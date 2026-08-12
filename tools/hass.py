@@ -322,20 +322,31 @@ def build_agenda_payload(hass: Hass, slot: str = "top-left", hours: int = 48) ->
     todos = todos[:6]
 
     # --- waste collection ---
+    #
+    # One badge per bin type, showing that type's *next* pickup -- listing the
+    # nearest four dates instead would show the same bin twice and hide the
+    # types that are further out, which is the opposite of what the row is for.
     waste = []
+    seen: set[str] = set()
     try:
         upcoming = calendar_events(hass, WASTE_CALENDAR, now,
-                                   now + _dt.timedelta(days=28))
+                                   now + _dt.timedelta(days=42))
     except HassError:
         upcoming = []
-    for ev in sorted(upcoming, key=lambda e: _event_start(e)[0])[:8]:
+
+    today = _dt.date.today()
+    for ev in sorted(upcoming, key=lambda e: _event_start(e)[0]):
         summary = (ev.get("summary") or "").strip().lower()
         letter = next((l for key, l in WASTE_LETTERS if key in summary), None)
-        if letter is None:
+        if letter is None or letter in seen:
             continue
+        seen.add(letter)
         ts, _ = _event_start(ev)
-        waste.append({"letter": letter,
-                      "label": f"{_WEEKDAYS[ts.weekday()]} {ts.day}."})
+        days_away = (ts.date() - today).days
+        # A weekday name is ambiguous beyond a week ("Mo" could be either
+        # Monday), so anything a week or more out is marked "+W" instead.
+        prefix = "+W" if days_away >= 7 else _WEEKDAYS[ts.weekday()]
+        waste.append({"letter": letter, "label": f"{prefix} {ts.day}."})
         if len(waste) >= 4:
             break
 

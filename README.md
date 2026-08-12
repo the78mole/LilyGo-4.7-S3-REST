@@ -162,9 +162,12 @@ HOMEASSISTANT_TOKEN=<long-lived access token>
   cached copy, and a service with no match renders `--:--` rather than a stale
   time.
 
-- **Waste collection** (`calendar.birkenweg_...`): the next four pickups as
-  lettered badges in the bottom-right corner — **R**estmüll, **G**elber Sack,
-  **B**iomüll, **P**apier — each with its weekday and date.
+- **Waste collection** (`calendar.birkenweg_...`): one badge per bin type
+  showing that type's *next* pickup — **R**estmüll, **G**elber Sack,
+  **B**iomüll, **P**apier — each with its weekday and date. Listing the
+  nearest four dates instead would show the same bin twice while hiding the
+  types further out. A pickup a week or more away is labelled `+W` instead of
+  a weekday, since a weekday name is ambiguous beyond seven days.
 
 - `weather.get_forecasts` (`hourly`, also accepts `daily` / `twice_daily`) plus
   the entity state, condensed into current conditions, today's min/max, 24h
