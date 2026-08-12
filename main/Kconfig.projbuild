@@ -210,13 +210,24 @@ menu "LilyGo T5-4.7 S3 Application"
             int "LVGL task priority"
             default 4
 
+        config APP_FULL_REFRESH_INTERVAL_MIN
+            int "Clear and redraw the whole panel at least this often (minutes)"
+            default 15
+            help
+                E-paper pixels drift from white towards grey as their charge
+                decays, and partial updates only ever touch the rectangle that
+                changed -- so the areas that change rarely are exactly the ones
+                that go grey. This deadline fires even when nothing is dirty,
+                which is the point: it is the only thing that reaches those
+                pixels. Costs a visible ~4s clear-and-redraw each time.
+
         config APP_FULL_REFRESH_EVERY
             int "Force a full panel refresh after this many partial updates"
             default 30
             help
-                Partial updates are fast but leave faint residue. With a
-                one-minute strip update that is a full clean-up every half
-                hour.
+                Partial updates are fast but leave faint residue. A second,
+                count-based trigger for bursts of pushes that would otherwise
+                pile up many partials well before the interval above elapses.
 
         config APP_LVGL_TICK_PERIOD_MS
             int "LVGL tick period (ms)"

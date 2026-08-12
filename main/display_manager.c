@@ -42,6 +42,13 @@ static TaskHandle_t s_refresh_task;
 static int s_dx1, s_dy1, s_dx2, s_dy2;
 static int s_partials_since_full;
 
+/* When the panel last had a full clear-and-redraw. Drives the periodic deep
+ * clean below; see the refresh task for why this is time- and not count-based. */
+static TickType_t s_last_full_tick;
+
+#define FULL_REFRESH_INTERVAL_TICKS \
+    pdMS_TO_TICKS((TickType_t)CONFIG_APP_FULL_REFRESH_INTERVAL_MIN * 60 * 1000)
+
 #define FRAMEBUFFER_SIZE (EPD_WIDTH * EPD_HEIGHT / 2)
 #define EPD_WHITE_BYTE   0xFF
 
@@ -114,10 +121,20 @@ static void refresh_task(void *arg)
 {
     (void)arg;
     for (;;) {
-        /* Wait for a wake-up, then debounce for a short window so several
-         * back-to-back LVGL flushes coalesce into one physical refresh. */
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        /* Wait for new content, but no longer than the deep-clean deadline:
+         * the whole point of that refresh is to reach pixels nothing has
+         * written to, so it must fire without a wake-up as well. */
+        TickType_t waited_since_full = xTaskGetTickCount() - s_last_full_tick;
+        TickType_t wait = waited_since_full >= FULL_REFRESH_INTERVAL_TICKS
+                              ? 0
+                              : FULL_REFRESH_INTERVAL_TICKS - waited_since_full;
+        ulTaskNotifyTake(pdTRUE, wait);
+        /* Debounce, so several back-to-back LVGL flushes coalesce into one
+         * physical refresh. */
         vTaskDelay(pdMS_TO_TICKS(CONFIG_APP_LVGL_HANDLER_PERIOD_MS * 2));
+
+        bool due_full =
+            (xTaskGetTickCount() - s_last_full_tick) >= FULL_REFRESH_INTERVAL_TICKS;
 
         xSemaphoreTake(s_fb_mutex, portMAX_DELAY);
         bool dirty = s_dirty;
@@ -125,8 +142,13 @@ static void refresh_task(void *arg)
         s_dirty = false;
         xSemaphoreGive(s_fb_mutex);
 
-        if (!dirty) {
+        if (!dirty && !due_full) {
             continue;
+        }
+        if (due_full) {
+            /* Redraw everything from the framebuffer, which always holds the
+             * complete current image -- no re-rendering needed above us. */
+            x1 = 0; y1 = 0; x2 = EPD_WIDTH - 1; y2 = EPD_HEIGHT - 1;
         }
 
         /* Align to 4 pixels, not 2: epd_clear_area_cycles() indexes its mask
@@ -150,11 +172,11 @@ static void refresh_task(void *arg)
         long area_px = (long)aw * ah;
         long full_px = (long)EPD_WIDTH * EPD_HEIGHT;
 
-        /* Partial updates leave a little residue behind, so fall back to a
-         * full clear when the change is large anyway, and force one
-         * periodically to stop ghosting accumulating over a long run of
-         * minute-by-minute strip updates. */
-        bool go_full = (area_px * 2 > full_px) ||
+        /* Three reasons to clear the whole panel instead of a rectangle:
+         * the deep-clean deadline; a change large enough that a partial buys
+         * nothing; and a long run of partials, which leaves faint residue and
+         * can hit the count before the deadline during a burst of pushes. */
+        bool go_full = due_full || (area_px * 2 > full_px) ||
                        (s_partials_since_full >= CONFIG_APP_FULL_REFRESH_EVERY);
 
         ESP_LOGD(TAG, "refresh: begin %s %dx%d at (%d,%d)",
@@ -164,7 +186,9 @@ static void refresh_task(void *arg)
             epd_clear();
             epd_draw_grayscale_image(epd_full_screen(), s_framebuffer);
             s_partials_since_full = 0;
-            ESP_LOGI(TAG, "full refresh");
+            s_last_full_tick = xTaskGetTickCount();
+            ESP_LOGI(TAG, "full refresh (%s)",
+                     due_full ? "periodic deep clean" : "large change");
         } else {
             /* epd_draw_grayscale_image() wants a buffer sized to the area, so
              * copy the rows out of the full framebuffer. */
@@ -190,6 +214,7 @@ static void refresh_task(void *arg)
                 epd_clear();
                 epd_draw_grayscale_image(epd_full_screen(), s_framebuffer);
                 s_partials_since_full = 0;
+                s_last_full_tick = xTaskGetTickCount();
             }
         }
         epd_poweroff();
@@ -217,6 +242,9 @@ esp_err_t display_manager_init(void)
     epd_poweron();
     epd_clear();
     epd_poweroff();
+    /* Counts as the first deep clean, so a reboot does not immediately spend
+     * another ~4s clearing an already-clean panel. */
+    s_last_full_tick = xTaskGetTickCount();
 
     BaseType_t ok = xTaskCreatePinnedToCore(refresh_task, "epd_refresh", 4096,
                                              NULL, tskIDLE_PRIORITY + 3,
