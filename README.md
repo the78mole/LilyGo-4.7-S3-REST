@@ -80,6 +80,13 @@ LilyGo-Screen-4.7-S3/
 
 ## Self-updating parts of the screen
 
+On startup the device draws its own screen (`draw_boot_screen()`) rather than
+staying blank until a client happens to push. The departure strip is real
+immediately — it comes from the device's own poller — while the other three
+cells say "Noch keine Daten". Without this a reboot left the panel blank
+indefinitely: e-paper holds nothing, and the per-minute refresh has no cell to
+paint into until one exists.
+
 Two things go stale on their own and are refreshed by the device, without a
 client push (`ui_tick.c`):
 
