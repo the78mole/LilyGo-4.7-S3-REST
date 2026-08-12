@@ -1,0 +1,12 @@
+dependencies:
+  idf: ">=5.0"
+
+  lvgl/lvgl:
+    version: "^8.3.6"
+
+  # NOTE: epdiy was removed deliberately. It has no board definition that
+  # matches this unit's 2021-6-10 / V2.3 PCB: `epd_board_lilygo_t5_47` is the
+  # classic ESP32 I2S path (compiled out on S3, fails to link), and
+  # `lilygo_board_s3` drives panel power via an I2C PCA9535 + TPS65185 that
+  # this revision does not have. The panel driver now lives in
+  # components/lilygo_epd47 (vendored LilyGo-EPD47) -- see its CMakeLists.txt.

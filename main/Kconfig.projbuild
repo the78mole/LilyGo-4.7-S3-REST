@@ -1,0 +1,100 @@
+menu "LilyGo T5-4.7 S3 Application"
+
+    menu "Wi-Fi"
+        config APP_WIFI_SSID
+            string "Wi-Fi SSID"
+            default "myssid"
+            help
+                STA-mode network the device joins on boot.
+
+        config APP_WIFI_PASSWORD
+            string "Wi-Fi Password"
+            default "mypassword"
+            help
+                Leave empty for an open network.
+
+        config APP_WIFI_MAX_RETRY
+            int "Max connection retries before giving up"
+            default 10
+    endmenu
+
+    menu "HTTP Server"
+        config APP_HTTP_PORT
+            int "REST API TCP port"
+            default 80
+
+        config APP_HTTP_MAX_UPLOAD_BYTES
+            int "Maximum accepted /api/upload body size (bytes)"
+            default 16777216
+            help
+                Guards against filling the SD card / exhausting an
+                attacker-controlled Content-Length. 16 MiB default.
+    endmenu
+
+    menu "SD Card (SPI)"
+        config APP_SD_MOUNT_POINT
+            string "VFS mount point"
+            default "/sdcard"
+
+        config APP_SD_PIN_MISO
+            int "SD MISO GPIO"
+            default 16
+            help
+                Defaults taken from LilyGo-EPD47 src/utilities.h
+                (CONFIG_IDF_TARGET_ESP32S3 branch), i.e. the 2021-6-10 / V2.3
+                PCB this project targets. Note these differ completely from
+                the later "S3 Pro" board (which uses 21/13/14/12) -- on V2.3,
+                GPIO21 is BUTTON_1, not SD CS.
+
+        config APP_SD_PIN_MOSI
+            int "SD MOSI GPIO"
+            default 15
+
+        config APP_SD_PIN_SCLK
+            int "SD SCLK GPIO"
+            default 11
+
+        config APP_SD_PIN_CS
+            int "SD CS GPIO"
+            default 42
+
+        config APP_SD_SPI_HOST
+            int "SPI host number for the SD card"
+            default 1
+            help
+                SPI2_HOST = 1, SPI3_HOST = 2 on ESP32-S3. The EPD panel
+                uses its own SPI-like parallel interface via epdiy and
+                does not share this bus.
+    endmenu
+
+    menu "RTOS Task Placement"
+        config APP_TASK_CORE_NETWORK
+            int "Core for Wi-Fi / HTTP server tasks"
+            default 0
+            help
+                PRO_CPU. Keeps networking off the core driving the panel.
+
+        config APP_TASK_CORE_DISPLAY
+            int "Core for LVGL / epdiy tasks"
+            default 1
+            help
+                APP_CPU. Isolates the timing-sensitive EPD refresh loop.
+
+        config APP_LVGL_TASK_STACK
+            int "LVGL task stack size (bytes)"
+            default 8192
+
+        config APP_LVGL_TASK_PRIORITY
+            int "LVGL task priority"
+            default 4
+
+        config APP_LVGL_TICK_PERIOD_MS
+            int "LVGL tick period (ms)"
+            default 5
+
+        config APP_LVGL_HANDLER_PERIOD_MS
+            int "lv_timer_handler() poll period (ms)"
+            default 20
+    endmenu
+
+endmenu

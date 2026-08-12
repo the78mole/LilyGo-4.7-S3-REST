@@ -1,0 +1,361 @@
+#include "api_handlers.h"
+
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "app_config.h"
+#include "cJSON.h"
+#include "esp_heap_caps.h"
+#include "esp_log.h"
+#include "lvgl.h"
+#include "lvgl_port.h"
+#include "sd_card.h"
+#include "sdkconfig.h"
+#include "wifi_manager.h"
+
+static const char *TAG = "api_handlers";
+
+#define UPLOAD_CHUNK_SIZE   4096
+#define JSON_BODY_MAX_BYTES 4096
+#define SD_LOCK_TIMEOUT_MS  5000
+#define LVGL_LOCK_TIMEOUT_MS 5000
+
+static esp_err_t send_err(httpd_req_t *req, httpd_err_code_t code, const char *msg)
+{
+    httpd_resp_send_err(req, code, msg);
+    return ESP_FAIL;
+}
+
+static esp_err_t send_ok(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"ok\"}");
+    return ESP_OK;
+}
+
+/* Rejects anything but a flat "name.ext" component -- no path separators,
+ * no "..", nothing that could escape APP_SD_MOUNT_POINT. */
+static bool is_safe_filename(const char *name)
+{
+    if (!name || name[0] == '\0') {
+        return false;
+    }
+    if (strstr(name, "..") != NULL) {
+        return false;
+    }
+    if (strchr(name, '/') != NULL || strchr(name, '\\') != NULL) {
+        return false;
+    }
+    return true;
+}
+
+static void build_sd_path(char *out, size_t out_len, const char *filename)
+{
+    snprintf(out, out_len, "%s/%s", sd_card_mount_point(), filename);
+}
+
+/* Reads the full (size-capped) request body into a heap buffer for JSON
+ * parsing. Display-command payloads are small by construction, unlike
+ * /api/upload which streams instead of buffering. */
+static esp_err_t read_json_body(httpd_req_t *req, char **out_buf)
+{
+    if (req->content_len <= 0 || req->content_len > JSON_BODY_MAX_BYTES) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    char *buf = malloc(req->content_len + 1);
+    if (!buf) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    int received = 0;
+    while (received < req->content_len) {
+        int r = httpd_req_recv(req, buf + received, req->content_len - received);
+        if (r <= 0) {
+            free(buf);
+            return ESP_FAIL;
+        }
+        received += r;
+    }
+    buf[received] = '\0';
+    *out_buf = buf;
+    return ESP_OK;
+}
+
+esp_err_t api_health_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, wifi_manager_is_connected()
+                                 ? "{\"status\":\"ok\",\"wifi_connected\":true}"
+                                 : "{\"status\":\"ok\",\"wifi_connected\":false}");
+    return ESP_OK;
+}
+
+esp_err_t api_upload_handler(httpd_req_t *req)
+{
+    if (req->content_len <= 0 || req->content_len > CONFIG_APP_HTTP_MAX_UPLOAD_BYTES) {
+        return send_err(req, HTTPD_400_BAD_REQUEST, "missing/oversized Content-Length");
+    }
+
+    size_t qs_len = httpd_req_get_url_query_len(req) + 1;
+    if (qs_len <= 1) {
+        return send_err(req, HTTPD_400_BAD_REQUEST, "missing ?filename=");
+    }
+
+    char *query = malloc(qs_len);
+    if (!query || httpd_req_get_url_query_str(req, query, qs_len) != ESP_OK) {
+        free(query);
+        return send_err(req, HTTPD_400_BAD_REQUEST, "bad query string");
+    }
+
+    char filename[128];
+    esp_err_t qerr = httpd_query_key_value(query, "filename", filename, sizeof(filename));
+    free(query);
+    if (qerr != ESP_OK || !is_safe_filename(filename)) {
+        return send_err(req, HTTPD_400_BAD_REQUEST, "missing/unsafe filename");
+    }
+
+    char path[192];
+    build_sd_path(path, sizeof(path), filename);
+
+    if (!sd_card_lock(pdMS_TO_TICKS(SD_LOCK_TIMEOUT_MS))) {
+        return send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "sd card busy");
+    }
+
+    FILE *f = fopen(path, "wb");
+    if (!f) {
+        int err_no = errno;
+        sd_card_unlock();
+        ESP_LOGE(TAG, "fopen('%s', wb) failed: errno=%d (%s)", path, err_no,
+                 strerror(err_no));
+        return send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "could not open file for writing");
+    }
+
+    char *chunk = malloc(UPLOAD_CHUNK_SIZE);
+    if (!chunk) {
+        fclose(f);
+        sd_card_unlock();
+        return send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "out of memory");
+    }
+
+    int remaining = req->content_len;
+    bool io_error = false;
+    while (remaining > 0) {
+        int to_read = remaining < UPLOAD_CHUNK_SIZE ? remaining : UPLOAD_CHUNK_SIZE;
+        int received = httpd_req_recv(req, chunk, to_read);
+        if (received == HTTPD_SOCK_ERR_TIMEOUT) {
+            continue;
+        }
+        if (received <= 0) {
+            io_error = true;
+            break;
+        }
+        if (fwrite(chunk, 1, received, f) != (size_t)received) {
+            io_error = true;
+            break;
+        }
+        remaining -= received;
+    }
+
+    free(chunk);
+    fclose(f);
+    sd_card_unlock();
+
+    if (io_error) {
+        ESP_LOGE(TAG, "upload of '%s' failed mid-stream", filename);
+        return send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "upload interrupted");
+    }
+
+    ESP_LOGI(TAG, "Wrote %s (%d bytes) to SD", path, req->content_len);
+    return send_ok(req);
+}
+
+/* Maps an 8-bit grayscale sample onto LVGL's LV_COLOR_DEPTH=8 (RGB332)
+ * pixel encoding so that (a) LV_IMG_CF_TRUE_COLOR draws it correctly and
+ * (b) our own flush callback's lv_color8_to_gray8() round-trips it back
+ * to (approximately) the same gray level. The on-disk format stays plain
+ * 8-bit grayscale so client-side tooling doesn't need to know about
+ * LVGL's pixel packing. */
+static inline uint8_t gray8_to_lv_color8(uint8_t gray)
+{
+    uint8_t r3 = (uint8_t)((gray * 7 + 127) / 255);
+    uint8_t g3 = r3;
+    uint8_t b2 = (uint8_t)((gray * 3 + 127) / 255);
+    return (uint8_t)((r3 << 5) | (g3 << 2) | b2);
+}
+
+esp_err_t api_display_image_handler(httpd_req_t *req)
+{
+    char *body;
+    esp_err_t err = read_json_body(req, &body);
+    if (err != ESP_OK) {
+        return send_err(req, HTTPD_400_BAD_REQUEST, "missing/oversized JSON body");
+    }
+
+    cJSON *root = cJSON_Parse(body);
+    free(body);
+    if (!root) {
+        return send_err(req, HTTPD_400_BAD_REQUEST, "invalid JSON");
+    }
+
+    cJSON *jfilename = cJSON_GetObjectItemCaseSensitive(root, "filename");
+    cJSON *jx = cJSON_GetObjectItemCaseSensitive(root, "x");
+    cJSON *jy = cJSON_GetObjectItemCaseSensitive(root, "y");
+
+    if (!cJSON_IsString(jfilename) || !cJSON_IsNumber(jx) || !cJSON_IsNumber(jy) ||
+        !is_safe_filename(jfilename->valuestring)) {
+        cJSON_Delete(root);
+        return send_err(req, HTTPD_400_BAD_REQUEST,
+                         "expected {\"filename\":str,\"x\":int,\"y\":int}");
+    }
+
+    char filename[128];
+    strlcpy(filename, jfilename->valuestring, sizeof(filename));
+    int x = jx->valueint;
+    int y = jy->valueint;
+    cJSON_Delete(root);
+
+    char path[192];
+    build_sd_path(path, sizeof(path), filename);
+
+    if (!sd_card_lock(pdMS_TO_TICKS(SD_LOCK_TIMEOUT_MS))) {
+        return send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "sd card busy");
+    }
+
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        sd_card_unlock();
+        return send_err(req, HTTPD_404_NOT_FOUND, "image not found on SD card");
+    }
+
+    uint8_t header[APP_IMAGE_HEADER_SIZE];
+    if (fread(header, 1, sizeof(header), f) != sizeof(header)) {
+        fclose(f);
+        sd_card_unlock();
+        return send_err(req, HTTPD_400_BAD_REQUEST, "truncated image header");
+    }
+
+    uint16_t width = (uint16_t)(header[0] | (header[1] << 8));
+    uint16_t height = (uint16_t)(header[2] | (header[3] << 8));
+    size_t pixel_count = (size_t)width * height;
+
+    if (width == 0 || height == 0 || pixel_count > 4u * 1024 * 1024) {
+        fclose(f);
+        sd_card_unlock();
+        return send_err(req, HTTPD_400_BAD_REQUEST, "invalid image dimensions");
+    }
+
+    uint8_t *pixels = heap_caps_malloc(pixel_count, MALLOC_CAP_SPIRAM);
+    if (!pixels) {
+        fclose(f);
+        sd_card_unlock();
+        return send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "out of memory");
+    }
+
+    size_t read_bytes = fread(pixels, 1, pixel_count, f);
+    fclose(f);
+    sd_card_unlock();
+
+    if (read_bytes != pixel_count) {
+        heap_caps_free(pixels);
+        return send_err(req, HTTPD_400_BAD_REQUEST, "truncated pixel data");
+    }
+
+    for (size_t i = 0; i < pixel_count; i++) {
+        pixels[i] = gray8_to_lv_color8(pixels[i]);
+    }
+
+    lv_img_dsc_t *dsc = heap_caps_malloc(sizeof(lv_img_dsc_t), MALLOC_CAP_SPIRAM);
+    if (!dsc) {
+        heap_caps_free(pixels);
+        return send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "out of memory");
+    }
+    dsc->header.always_zero = 0;
+    dsc->header.w = width;
+    dsc->header.h = height;
+    dsc->header.cf = LV_IMG_CF_TRUE_COLOR;
+    dsc->data_size = pixel_count;
+    dsc->data = pixels;
+
+    if (!lvgl_port_lock(LVGL_LOCK_TIMEOUT_MS)) {
+        heap_caps_free(pixels);
+        heap_caps_free(dsc);
+        return send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "display busy");
+    }
+
+    /* NOTE: each call creates a new image object; `dsc`/`pixels` are kept
+     * alive for the object's lifetime and intentionally not freed here.
+     * This template does not track/evict previously placed images -- add
+     * that (or a DELETE endpoint) before using this on a long-running
+     * device that receives many distinct images. */
+    lv_obj_t *img = lv_img_create(lv_scr_act());
+    lv_img_set_src(img, dsc);
+    lv_obj_set_pos(img, x, y);
+
+    lvgl_port_unlock();
+
+    ESP_LOGI(TAG, "Placed image '%s' (%ux%u) at (%d,%d)", filename, width, height, x, y);
+    return send_ok(req);
+}
+
+static const lv_font_t *font_for_size(int size)
+{
+    if (size <= 14) return &lv_font_montserrat_14;
+    if (size <= 18) return &lv_font_montserrat_18;
+    if (size <= 24) return &lv_font_montserrat_24;
+    if (size <= 28) return &lv_font_montserrat_28;
+    if (size <= 32) return &lv_font_montserrat_32;
+    return &lv_font_montserrat_40;
+}
+
+esp_err_t api_display_text_handler(httpd_req_t *req)
+{
+    char *body;
+    esp_err_t err = read_json_body(req, &body);
+    if (err != ESP_OK) {
+        return send_err(req, HTTPD_400_BAD_REQUEST, "missing/oversized JSON body");
+    }
+
+    cJSON *root = cJSON_Parse(body);
+    free(body);
+    if (!root) {
+        return send_err(req, HTTPD_400_BAD_REQUEST, "invalid JSON");
+    }
+
+    cJSON *jtext = cJSON_GetObjectItemCaseSensitive(root, "text");
+    cJSON *jx = cJSON_GetObjectItemCaseSensitive(root, "x");
+    cJSON *jy = cJSON_GetObjectItemCaseSensitive(root, "y");
+    cJSON *jsize = cJSON_GetObjectItemCaseSensitive(root, "size");
+
+    if (!cJSON_IsString(jtext) || !cJSON_IsNumber(jx) || !cJSON_IsNumber(jy)) {
+        cJSON_Delete(root);
+        return send_err(req, HTTPD_400_BAD_REQUEST,
+                         "expected {\"text\":str,\"x\":int,\"y\":int,\"size\":int}");
+    }
+
+    char text[256];
+    strlcpy(text, jtext->valuestring, sizeof(text));
+    int x = jx->valueint;
+    int y = jy->valueint;
+    int size = cJSON_IsNumber(jsize) ? jsize->valueint : 18;
+    cJSON_Delete(root);
+
+    if (!lvgl_port_lock(LVGL_LOCK_TIMEOUT_MS)) {
+        return send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "display busy");
+    }
+
+    /* Each call adds a new label rather than replacing prior text, so the
+     * screen behaves like a persistent canvas. Same lifecycle caveat as
+     * api_display_image_handler() applies. */
+    lv_obj_t *label = lv_label_create(lv_scr_act());
+    lv_obj_set_style_text_font(label, font_for_size(size), 0);
+    lv_label_set_text(label, text);
+    lv_obj_set_pos(label, x, y);
+
+    lvgl_port_unlock();
+
+    ESP_LOGI(TAG, "Placed text '%s' at (%d,%d) size=%d", text, x, y, size);
+    return send_ok(req);
+}

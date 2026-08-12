@@ -1,0 +1,21 @@
+# Secrets -- WIFI_SSID / WIFI_PASS leben hier, niemals committen.
+.env
+
+# Flash-Dumps (16MB pro Stueck). Gehoeren nicht in git, sondern als
+# OCI-Artefakt in die GitHub Container Registry -> `make push-backup`.
+backups/
+
+build/
+sdkconfig
+sdkconfig.old
+# Generated from .env by `make secrets` -- contains Wi-Fi credentials.
+sdkconfig.secrets
+managed_components/
+dependencies.lock
+.vscode/
+*.pyc
+__pycache__/
+.venv/
+tools/.venv/
+*.map
+*.bin.orig

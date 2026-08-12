@@ -1,0 +1,73 @@
+# -----------------------------------------------------------------------
+# LilyGo T5-4.7 S3 (ESP32-S3, ED047TC1, 16MB flash / 8MB Octal PSRAM)
+# -----------------------------------------------------------------------
+
+# --- Compiler ---
+# The default "Debug" (-Og) build fails to link: epdiy's
+# output_i2s/render_i2s.h declares fast_gpio_set_hi/lo as plain (non-static)
+# `inline`, which under strict C99 inline semantics needs an external
+# definition that only materializes when the compiler fully inlines away
+# every call site -- -Og doesn't reliably do that, -Os/-O2 do. "Size" is
+# also the more appropriate choice for shipped firmware anyway.
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# --- Target / flash ---
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_OFFSET=0x8000
+
+# --- PSRAM ---
+# CONFIG_SPIRAM_MODE_OCT is set based on `esptool.py chip_id` reporting
+# "Embedded PSRAM 8MB (AP_3v3)" on the actual target board, which is
+# Espressif's designator for Octal PSRAM. Not yet confirmed by a
+# successful boot at the time this default was written -- if the device
+# panics early with a PSRAM init error, switch to CONFIG_SPIRAM_MODE_QUAD
+# (`idf.py menuconfig` -> Component config -> ESP PSRAM -> Mode (QUAD/OCT)
+# of SPI RAM chip in use).
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+
+# --- FreeRTOS: dual core, both cores active ---
+CONFIG_FREERTOS_UNICORE=n
+
+# --- Wi-Fi driver task pinned to PRO_CPU (core 0) ---
+CONFIG_ESP_WIFI_TASK_PINNED_TO_CORE_0=y
+
+# --- LVGL ---
+# This LVGL component's Kconfig only exposes an on/off switch + the
+# #include line for a custom allocator, not the alloc/free/realloc
+# function names themselves -- so LV_MEM_CUSTOM_ALLOC/FREE/REALLOC fall
+# back to plain malloc/free/realloc (lv_conf_internal.h default) rather
+# than a PSRAM-specific wrapper. That's still meaningful together with
+# CONFIG_SPIRAM_USE_MALLOC=y above: ESP-IDF's malloc() itself spills
+# allocations larger than CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL into PSRAM
+# automatically. The big, deliberately-PSRAM allocations (LVGL draw
+# buffers, the grayscale scratch buffer, uploaded image pixel data) are
+# placed explicitly via heap_caps_malloc(..., MALLOC_CAP_SPIRAM) in
+# lvgl_port.c / api_handlers.c regardless of this setting.
+CONFIG_LV_COLOR_DEPTH_8=y
+CONFIG_LV_COLOR_16_SWAP=n
+CONFIG_LV_MEM_CUSTOM=y
+CONFIG_LV_FONT_MONTSERRAT_14=y
+CONFIG_LV_FONT_MONTSERRAT_18=y
+CONFIG_LV_FONT_MONTSERRAT_24=y
+CONFIG_LV_FONT_MONTSERRAT_28=y
+CONFIG_LV_FONT_MONTSERRAT_32=y
+CONFIG_LV_FONT_MONTSERRAT_40=y
+CONFIG_LV_USE_LOG=y
+
+# --- epdiy: board (epd_board_lilygo_t5_47) + panel (ED047TC1) are passed
+# explicitly to epd_init() in display_manager.c -- this epdiy version has
+# no Kconfig-based board/display selection, so there's nothing to set here.
+
+# --- VFS / FATFS for the SD card ---
+CONFIG_FATFS_LFN_HEAP=y
+CONFIG_FATFS_LFN_STACK=n
+
+# --- Log level ---
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
