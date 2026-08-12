@@ -176,20 +176,13 @@ static void refresh_task(void *arg)
                            s_framebuffer + (size_t)(y1 + y) * (EPD_WIDTH / 2) + x1 / 2,
                            row_bytes);
                 }
-                /* Draw shifted against the cleared rectangle to cancel the
-                 * driver's asymmetric row pipelining -- see
-                 * CONFIG_APP_PARTIAL_Y_SHIFT. */
-                int draw_y = y1 + CONFIG_APP_PARTIAL_Y_SHIFT;
-                if (draw_y < 0) draw_y = 0;
-                if (draw_y + ah > EPD_HEIGHT) draw_y = EPD_HEIGHT - ah;
                 Rect_t area = { .x = x1, .y = y1, .width = aw, .height = ah };
-                Rect_t draw_area = { .x = x1, .y = draw_y, .width = aw, .height = ah };
                 /* E-paper is persistent: drawing without clearing first
                  * overlays the new image on the old one instead of replacing
                  * it. The full-refresh path calls epd_clear() for the same
                  * reason. */
                 epd_clear_area(area);
-                epd_draw_grayscale_image(draw_area, sub);
+                epd_draw_grayscale_image(area, sub);
                 heap_caps_free(sub);
                 s_partials_since_full++;
                 ESP_LOGI(TAG, "partial refresh %dx%d at (%d,%d)", aw, ah, x1, y1);
