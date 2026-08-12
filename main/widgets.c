@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "departures.h"
 #include "ui_card.h"
 
 static const char *TAG = "widgets";
@@ -126,12 +127,13 @@ esp_err_t widget_agenda_draw(const widget_agenda_spec_t *spec)
     ui_card_text(&card, col_r, 0, col_w, "Aufgaben", UI_MID, &lv_font_montserrat_14);
     ui_card_rect(&card, 0, 17, card.cw, 1, UI_LIGHT);
     /* Column divider, stopping short of the waste badges. */
-    ui_card_rect(&card, col_w + gap / 2, 0, 1, card.ch - 30, UI_LIGHT);
+    const int strip_y = card.ch - 34;
+    ui_card_rect(&card, col_w + gap / 2, 0, 1, strip_y - 4, UI_LIGHT);
 
     /* --- appointments: two lines each, so the summary gets real width --- */
     int n_ev = spec->event_count > WIDGET_AGENDA_MAX_EVENTS
                    ? WIDGET_AGENDA_MAX_EVENTS : spec->event_count;
-    const int ev_row = 28;
+    const int ev_row = 26;
     char buf[WIDGET_TEXT_MAX + 24];
     char fitted[WIDGET_TEXT_MAX + 8];
 
@@ -163,30 +165,60 @@ esp_err_t widget_agenda_draw(const widget_agenda_spec_t *spec)
         ui_card_text(&card, col_r, 24, col_w, "nichts offen", UI_MID, &lv_font_montserrat_14);
     }
 
-    /* --- waste collection: small lettered badges, bottom-right --- */
+    /* --- bottom strip: departures on the left, waste badges on the right --- */
+    ui_card_rect(&card, 0, strip_y - 6, card.cw, 1, UI_LIGHT);
+
     int n_w = spec->waste_count > WIDGET_AGENDA_MAX_WASTE
                   ? WIDGET_AGENDA_MAX_WASTE : spec->waste_count;
+    int waste_left = card.cw;
     if (n_w > 0) {
-        const int bw = 20, bh = 20, bgap = 6;
-        int total = n_w * bw + (n_w - 1) * bgap;
-        int bx0 = card.cw - total;
-        int by = card.ch - 30;
-        for (int i = 0; i < n_w; i++) {
-            int bx = bx0 + i * (bw + bgap);
-            /* Filled box + knocked-out letter: at 20px this stays readable
-             * where an outlined glyph would smear on e-paper. */
-            ui_card_rect(&card, bx, by, bw, bh, UI_BLACK);
-            ui_text_ex(card.canvas, card.cx0 + bx, card.cy0 + by + 2, bw,
-                       spec->waste[i].letter, UI_WHITE, &lv_font_montserrat_14,
-                       LV_TEXT_ALIGN_CENTER, true);
-            ui_text_ex(card.canvas, card.cx0 + bx - 6, card.cy0 + by + bh + 1, bw + 12,
-                       spec->waste[i].label, UI_MID, &lv_font_montserrat_14,
-                       LV_TEXT_ALIGN_CENTER, false);
+        const int bh = 20, bgap = 6;
+        /* Lay out right-to-left so the row stays flush with the corner
+         * regardless of how wide the individual badges turn out. */
+        int bx = card.cw;
+        for (int i = n_w - 1; i >= 0; i--) {
+            int bw = lv_txt_get_width(spec->waste[i].letter, strlen(spec->waste[i].letter),
+                                      &lv_font_montserrat_14, 0, LV_TEXT_FLAG_NONE) + 12;
+            if (bw < bh) bw = bh;
+            bx -= bw;
+            ui_card_badge(&card, bx, strip_y, bh, spec->waste[i].letter);
+            ui_text_ex(card.canvas, card.cx0 + bx - 8, card.cy0 + strip_y + bh + 1,
+                       bw + 16, spec->waste[i].label, UI_MID,
+                       &lv_font_montserrat_14, LV_TEXT_ALIGN_CENTER, false);
+            bx -= bgap;
         }
+        waste_left = bx;
     }
 
-    ESP_LOGI(TAG, "agenda '%s': %d events, %d todos, %d waste",
-             spec->title, n_ev, n_td, n_w);
+    /* Departures are read straight from the device-side poller rather than
+     * arriving over REST, so they stay current between dashboard pushes. */
+    departure_t deps[DEPARTURES_MAX];
+    int n_dep = departures_get(deps, DEPARTURES_MAX);
+    int dx = 0;
+    for (int i = 0; i < n_dep; i++) {
+        if (deps[i].line[0] == '\0') {
+            continue;
+        }
+        int bw = ui_card_badge(&card, dx, strip_y, 20, deps[i].line);
+        char txt[24];
+        if (deps[i].valid) {
+            snprintf(txt, sizeof(txt), "%s +%d", deps[i].time, deps[i].delay_min);
+        } else {
+            /* Never show a stale time as if it were current. */
+            strlcpy(txt, "--:--", sizeof(txt));
+        }
+        int tw = lv_txt_get_width(txt, strlen(txt), &lv_font_montserrat_14, 0,
+                                  LV_TEXT_FLAG_NONE);
+        if (dx + bw + 6 + tw > waste_left - 10) {
+            break; /* would run into the waste badges */
+        }
+        ui_card_text(&card, dx + bw + 6, strip_y + 2, tw + 8, txt,
+                     UI_BLACK, &lv_font_montserrat_14);
+        dx += bw + 6 + tw + 14;
+    }
+
+    ESP_LOGI(TAG, "agenda '%s': %d events, %d todos, %d waste, %d departures",
+             spec->title, n_ev, n_td, n_w, n_dep);
     return ESP_OK;
 }
 

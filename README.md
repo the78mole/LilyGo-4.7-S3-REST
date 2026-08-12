@@ -137,6 +137,20 @@ HOMEASSISTANT_TOKEN=<long-lived access token>
   list the nearest due date wins and undated items sort last, so **overdue
   items surface first**, which is the point. Note not every list carries due
   dates (`todo.bizzmark` has none at all).
+- **Public transport** — the one data source the **device fetches itself**,
+  rather than receiving over REST. `departures.c` polls the VGN EFA departure
+  monitor (`efa.vgn.de`) over HTTPS every `CONFIG_APP_DEP_REFRESH_S` seconds
+  on the network core, so the times stay current between dashboard pushes and
+  do not depend on a host being awake. Ported from
+  `the78mole/Playground/vgn-abfahrten/vgn_abfahrten.py`.
+
+  Direction is matched on `servingLine.liErgRiProj.direction` (`H`/`R`), not
+  the displayed destination: the S1 towards Nuremberg shows up variously as
+  "Lauf (li Pegn)", "Hartmannshof" and so on, while the direction code is
+  stable. Rendering never blocks on the network — drawing code only reads the
+  cached copy, and a service with no match renders `--:--` rather than a stale
+  time.
+
 - **Waste collection** (`calendar.birkenweg_...`): the next four pickups as
   lettered badges in the bottom-right corner — **R**estmüll, **G**elber Sack,
   **B**iomüll, **P**apier — each with its weekday and date.

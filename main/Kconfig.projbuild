@@ -128,6 +128,48 @@ menu "LilyGo T5-4.7 S3 Application"
             default 10
     endmenu
 
+    menu "Public Transport (VGN EFA)"
+        config APP_DEP1_STOP
+            string "Departure 1: EFA stop id"
+            default "3003410"
+            help
+                3003410 = Bruck (Erlangen), Bahnhof.
+
+        config APP_DEP1_LINE
+            string "Departure 1: line number"
+            default "S1"
+
+        config APP_DEP1_DIR
+            string "Departure 1: EFA direction code (H/R)"
+            default "H"
+            help
+                Matched against servingLine.liErgRiProj.direction. More stable
+                than the displayed destination, which varies with short
+                workings (Lauf, Hartmannshof, ... all being "towards
+                Nuremberg").
+
+        config APP_DEP2_STOP
+            string "Departure 2: EFA stop id"
+            default "3003463"
+            help
+                3003463 = Bruck (Erlangen), Bachfeldstr.
+
+        config APP_DEP2_LINE
+            string "Departure 2: line number"
+            default "285"
+
+        config APP_DEP2_DIR
+            string "Departure 2: EFA direction code (H/R)"
+            default "H"
+
+        config APP_DEP_REFRESH_S
+            int "Refresh interval (seconds)"
+            default 120
+            help
+                The device polls EFA itself, so departures stay current
+                between dashboard pushes.
+    endmenu
+
     menu "RTOS Task Placement"
         config APP_TASK_CORE_NETWORK
             int "Core for Wi-Fi / HTTP server tasks"

@@ -5,6 +5,7 @@
 #include "http_server.h"
 #include "lvgl_port.h"
 #include "sd_card.h"
+#include "departures.h"
 #include "time_sync.h"
 #include "wifi_manager.h"
 
@@ -42,6 +43,12 @@ void app_main(void)
      * client never has to send a highlight index. */
     if (time_sync_start() != ESP_OK) {
         ESP_LOGW(TAG, "SNTP start failed -- charts will render without a now-marker");
+    }
+
+    /* Departures are fetched by the device itself, so they stay current
+     * between dashboard pushes instead of ageing with the last REST call. */
+    if (departures_start() != ESP_OK) {
+        ESP_LOGW(TAG, "departure poller failed to start");
     }
 
     ESP_LOGI(TAG, "Starting REST API...");

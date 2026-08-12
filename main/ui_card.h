@@ -64,6 +64,15 @@ void ui_text_ex(lv_obj_t *canvas, int x, int y, int max_w, const char *txt,
                 lv_color_t color, const lv_font_t *font,
                 lv_text_align_t align, bool bold);
 
+/*
+ * Small filled badge with a rounded corner and knocked-out centred text --
+ * used for the waste-collection letters and the transit line numbers so both
+ * read as the same kind of token. Returns the width actually used, which
+ * depends on the label, so callers can lay several out in a row.
+ * Coordinates are in *content* space.
+ */
+int ui_card_badge(ui_card_t *card, int x, int y, int h, const char *label);
+
 /* Convenience wrappers operating in *content* coordinates. */
 void ui_card_rect(ui_card_t *card, int x, int y, int w, int h, lv_color_t color);
 void ui_card_text(ui_card_t *card, int x, int y, int max_w, const char *txt,

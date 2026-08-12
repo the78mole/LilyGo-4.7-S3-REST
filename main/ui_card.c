@@ -100,6 +100,33 @@ void ui_text_ex(lv_obj_t *canvas, int x, int y, int max_w, const char *txt,
     }
 }
 
+int ui_card_badge(ui_card_t *card, int x, int y, int h, const char *label)
+{
+    if (!card || !card->canvas || !label) {
+        return 0;
+    }
+    const lv_font_t *font = &lv_font_montserrat_14;
+    int tw = lv_txt_get_width(label, strlen(label), font, 0, LV_TEXT_FLAG_NONE);
+    int w = tw + 12;
+    if (w < h) {
+        w = h; /* keep single characters square rather than letting them squash */
+    }
+
+    lv_draw_rect_dsc_t rect;
+    lv_draw_rect_dsc_init(&rect);
+    rect.bg_opa = LV_OPA_COVER;
+    rect.bg_color = UI_BLACK;
+    rect.radius = 4;
+    rect.border_width = 0;
+    lv_canvas_draw_rect(card->canvas, card->cx0 + x, card->cy0 + y, w, h, &rect);
+
+    /* Bold, because knocked-out white text on black loses definition on
+     * e-paper at this size. */
+    ui_text_ex(card->canvas, card->cx0 + x, card->cy0 + y + (h - 16) / 2, w,
+               label, UI_WHITE, font, LV_TEXT_ALIGN_CENTER, true);
+    return w;
+}
+
 void ui_card_rect(ui_card_t *card, int x, int y, int w, int h, lv_color_t color)
 {
     if (!card || !card->canvas || w <= 0 || h <= 0) {

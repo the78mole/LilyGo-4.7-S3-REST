@@ -11,6 +11,7 @@ idf_component_register(
         "ui_card.c"
         "widgets.c"
         "time_sync.c"
+        "departures.c"
     INCLUDE_DIRS "."
     REQUIRES
         esp_wifi
@@ -25,6 +26,9 @@ idf_component_register(
         esp_timer
         vfs
         lwip
+        esp_http_client
+        esp-tls
+        mbedtls
         # Managed component pulled in via idf_component.yml.
         lvgl
         # Local component: components/lilygo_epd47 (vendored LilyGo-EPD47).
