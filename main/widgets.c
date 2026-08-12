@@ -205,11 +205,15 @@ esp_err_t widget_agenda_draw(const widget_agenda_spec_t *spec)
         }
 
         char txt[24];
-        if (deps[i].valid) {
-            snprintf(txt, sizeof(txt), "%s +%d", deps[i].time, deps[i].delay_min);
-        } else {
+        if (!deps[i].valid) {
             /* Never present a stale time as if it were current. */
             strlcpy(txt, "--:--", sizeof(txt));
+        } else if (deps[i].cancelled) {
+            /* Replaces the time entirely: a scheduled time for a trip that
+             * will not run is worse than no time at all. */
+            strlcpy(txt, "AUSGEF", sizeof(txt));
+        } else {
+            snprintf(txt, sizeof(txt), "%s +%d", deps[i].time, deps[i].delay_min);
         }
 
         int bw = lv_txt_get_width(badge, strlen(badge), &lv_font_montserrat_14,

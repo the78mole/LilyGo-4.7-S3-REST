@@ -150,6 +150,11 @@ HOMEASSISTANT_TOKEN=<long-lived access token>
   its own badge label. Queries sharing a stop fetch it only once — the monitor
   response is ~24 kB, so the three entries cost two requests, not three.
 
+  Cancelled trips are flagged by EFA with `servingLine.delay == "-9999"` — a
+  sentinel, not a real delay. The panel then prints `AUSGEF` in place of the
+  time entirely, since a scheduled time for a trip that will not run is worse
+  than no time at all.
+
   Direction is matched on `servingLine.liErgRiProj.direction` (`H`/`R`), not
   the displayed destination: the S1 towards Nuremberg shows up variously as
   "Lauf (li Pegn)", "Hartmannshof" and so on, while the direction code is

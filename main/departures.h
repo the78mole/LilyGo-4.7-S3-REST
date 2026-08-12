@@ -14,6 +14,7 @@ typedef struct {
     char dir[8];    /* direction abbreviation shown next to the line, e.g. "N" */
     char time[8];   /* planned departure, "HH:MM" */
     int delay_min;  /* realtime minus planned; 0 when no realtime data */
+    bool cancelled; /* trip is cancelled -- time and delay are meaningless */
     bool valid;     /* false when the last fetch found no matching service */
 } departure_t;
 

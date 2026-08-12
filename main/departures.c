@@ -192,8 +192,17 @@ static bool parse_first_match(const char *json, const query_t *q, departure_t *o
         strlcpy(out->line, q->line, sizeof(out->line));
         strlcpy(out->dir, q->label, sizeof(out->dir));
         snprintf(out->time, sizeof(out->time), "%02d:%02d", hh, mm);
+
+        /* EFA flags a cancelled trip with servingLine.delay == "-9999" (a
+         * sentinel, not a real delay -- treating it as a number would render
+         * the departure as nearly seven days early). */
+        cJSON *jdelay = cJSON_GetObjectItemCaseSensitive(sl, "delay");
+        const char *delay_s = cJSON_IsString(jdelay) ? jdelay->valuestring : NULL;
+        out->cancelled = (delay_s && strcmp(delay_s, "-9999") == 0) ||
+                         (cJSON_IsNumber(jdelay) && jdelay->valueint == -9999);
+
         cJSON *real = cJSON_GetObjectItemCaseSensitive(dep, "realDateTime");
-        out->delay_min = real ? minutes_between(planned, real) : 0;
+        out->delay_min = (!out->cancelled && real) ? minutes_between(planned, real) : 0;
         out->valid = true;
         found = true;
         break;
@@ -258,9 +267,13 @@ static void refresh_once(void)
 
     for (int i = 0; i < DEPARTURES_MAX; i++) {
         if (fresh[i].valid) {
-            ESP_LOGI(TAG, "%s%s%s %s +%d", fresh[i].line,
-                     fresh[i].dir[0] ? " " : "", fresh[i].dir,
-                     fresh[i].time, fresh[i].delay_min);
+            if (fresh[i].cancelled) {
+                ESP_LOGI(TAG, "%s %s AUSFALL", fresh[i].line, fresh[i].time);
+            } else {
+                ESP_LOGI(TAG, "%s%s%s %s +%d", fresh[i].line,
+                         fresh[i].dir[0] ? " " : "", fresh[i].dir,
+                         fresh[i].time, fresh[i].delay_min);
+            }
         }
     }
 }
