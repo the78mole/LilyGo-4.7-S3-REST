@@ -7,10 +7,11 @@
 extern "C" {
 #endif
 
-#define DEPARTURES_MAX 2
+#define DEPARTURES_MAX 3
 
 typedef struct {
     char line[8];   /* "S1", "285" */
+    char dir[8];    /* direction abbreviation shown next to the line, e.g. "N" */
     char time[8];   /* planned departure, "HH:MM" */
     int delay_min;  /* realtime minus planned; 0 when no realtime data */
     bool valid;     /* false when the last fetch found no matching service */

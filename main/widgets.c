@@ -127,13 +127,13 @@ esp_err_t widget_agenda_draw(const widget_agenda_spec_t *spec)
     ui_card_text(&card, col_r, 0, col_w, "Aufgaben", UI_MID, &lv_font_montserrat_14);
     ui_card_rect(&card, 0, 17, card.cw, 1, UI_LIGHT);
     /* Column divider, stopping short of the waste badges. */
-    const int strip_y = card.ch - 34;
+    const int strip_y = card.ch - 40;
     ui_card_rect(&card, col_w + gap / 2, 0, 1, strip_y - 4, UI_LIGHT);
 
     /* --- appointments: two lines each, so the summary gets real width --- */
     int n_ev = spec->event_count > WIDGET_AGENDA_MAX_EVENTS
                    ? WIDGET_AGENDA_MAX_EVENTS : spec->event_count;
-    const int ev_row = 26;
+    const int ev_row = 25;
     char buf[WIDGET_TEXT_MAX + 24];
     char fitted[WIDGET_TEXT_MAX + 8];
 
@@ -191,34 +191,45 @@ esp_err_t widget_agenda_draw(const widget_agenda_spec_t *spec)
     }
 
     /* Departures are read straight from the device-side poller rather than
-     * arriving over REST, so they stay current between dashboard pushes. */
+     * arriving over REST, so they stay current between dashboard pushes.
+     * Stacked like the waste badges -- label above, time below -- but with
+     * both left edges aligned so the columns read as a row of entries. */
     departure_t deps[DEPARTURES_MAX];
     int n_dep = departures_get(deps, DEPARTURES_MAX);
     int dx = 0;
+    int shown = 0;
     for (int i = 0; i < n_dep; i++) {
-        if (deps[i].line[0] == '\0') {
+        const char *badge = deps[i].dir[0] ? deps[i].dir : deps[i].line;
+        if (badge[0] == '\0') {
             continue;
         }
-        int bw = ui_card_badge(&card, dx, strip_y, 20, deps[i].line);
+
         char txt[24];
         if (deps[i].valid) {
             snprintf(txt, sizeof(txt), "%s +%d", deps[i].time, deps[i].delay_min);
         } else {
-            /* Never show a stale time as if it were current. */
+            /* Never present a stale time as if it were current. */
             strlcpy(txt, "--:--", sizeof(txt));
         }
-        int tw = lv_txt_get_width(txt, strlen(txt), &lv_font_montserrat_14, 0,
-                                  LV_TEXT_FLAG_NONE);
-        if (dx + bw + 6 + tw > waste_left - 10) {
+
+        int bw = lv_txt_get_width(badge, strlen(badge), &lv_font_montserrat_14,
+                                  0, LV_TEXT_FLAG_NONE) + 12;
+        int tw = lv_txt_get_width(txt, strlen(txt), &lv_font_montserrat_14,
+                                  0, LV_TEXT_FLAG_NONE);
+        int col_w = bw > tw ? bw : tw;
+        if (dx + col_w > waste_left - 12) {
             break; /* would run into the waste badges */
         }
-        ui_card_text(&card, dx + bw + 6, strip_y + 2, tw + 8, txt,
-                     UI_BLACK, &lv_font_montserrat_14);
-        dx += bw + 6 + tw + 14;
+
+        ui_card_badge(&card, dx, strip_y, 20, badge);
+        ui_card_text(&card, dx, strip_y + 22, col_w + 8, txt, UI_BLACK,
+                     &lv_font_montserrat_14);
+        dx += col_w + 12;
+        shown++;
     }
 
     ESP_LOGI(TAG, "agenda '%s': %d events, %d todos, %d waste, %d departures",
-             spec->title, n_ev, n_td, n_w, n_dep);
+             spec->title, n_ev, n_td, n_w, shown);
     return ESP_OK;
 }
 

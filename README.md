@@ -144,6 +144,12 @@ HOMEASSISTANT_TOKEN=<long-lived access token>
   do not depend on a host being awake. Ported from
   `the78mole/Playground/vgn-abfahrten/vgn_abfahrten.py`.
 
+  Three services are configured by default, mirroring the reference script's
+  tags: `S1-NBG`, `S1-BBG` and `285`. The first two are the *same line at the
+  same stop in opposite directions*, which is precisely why each entry carries
+  its own badge label. Queries sharing a stop fetch it only once — the monitor
+  response is ~24 kB, so the three entries cost two requests, not three.
+
   Direction is matched on `servingLine.liErgRiProj.direction` (`H`/`R`), not
   the displayed destination: the S1 towards Nuremberg shows up variously as
   "Lauf (li Pegn)", "Hartmannshof" and so on, while the direction code is

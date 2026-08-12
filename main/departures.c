@@ -40,12 +40,14 @@ static const char *TAG = "departures";
 typedef struct {
     const char *stop_id;
     const char *line;
-    const char *direction;
+    const char *direction;  /* EFA code H/R */
+    const char *label;      /* short direction hint shown on the panel */
 } query_t;
 
 static const query_t s_queries[DEPARTURES_MAX] = {
-    { CONFIG_APP_DEP1_STOP, CONFIG_APP_DEP1_LINE, CONFIG_APP_DEP1_DIR },
-    { CONFIG_APP_DEP2_STOP, CONFIG_APP_DEP2_LINE, CONFIG_APP_DEP2_DIR },
+    { CONFIG_APP_DEP1_STOP, CONFIG_APP_DEP1_LINE, CONFIG_APP_DEP1_DIR, CONFIG_APP_DEP1_LABEL },
+    { CONFIG_APP_DEP2_STOP, CONFIG_APP_DEP2_LINE, CONFIG_APP_DEP2_DIR, CONFIG_APP_DEP2_LABEL },
+    { CONFIG_APP_DEP3_STOP, CONFIG_APP_DEP3_LINE, CONFIG_APP_DEP3_DIR, CONFIG_APP_DEP3_LABEL },
 };
 
 static departure_t s_cache[DEPARTURES_MAX];
@@ -188,6 +190,7 @@ static bool parse_first_match(const char *json, const query_t *q, departure_t *o
         }
 
         strlcpy(out->line, q->line, sizeof(out->line));
+        strlcpy(out->dir, q->label, sizeof(out->dir));
         snprintf(out->time, sizeof(out->time), "%02d:%02d", hh, mm);
         cJSON *real = cJSON_GetObjectItemCaseSensitive(dep, "realDateTime");
         out->delay_min = real ? minutes_between(planned, real) : 0;
@@ -209,18 +212,41 @@ static bool parse_first_match(const char *json, const query_t *q, departure_t *o
 static void refresh_once(void)
 {
     departure_t fresh[DEPARTURES_MAX] = {0};
+    char *cached[DEPARTURES_MAX] = {0};
     bool any = false;
 
     for (int i = 0; i < DEPARTURES_MAX; i++) {
         strlcpy(fresh[i].line, s_queries[i].line, sizeof(fresh[i].line));
-        char *json = fetch_json(s_queries[i].stop_id);
+        strlcpy(fresh[i].dir, s_queries[i].label, sizeof(fresh[i].dir));
+        if (s_queries[i].line[0] == '\0') {
+            continue;  /* slot left unconfigured */
+        }
+        /* Several queries can share a stop (the S1 in both directions), and
+         * the monitor response is ~24 kB -- fetch each stop only once. */
+        char *json = NULL;
+        bool borrowed = false;
+        for (int j = 0; j < i; j++) {
+            if (cached[j] && strcmp(s_queries[j].stop_id, s_queries[i].stop_id) == 0) {
+                json = cached[j];
+                borrowed = true;
+                break;
+            }
+        }
+        if (!json) {
+            json = fetch_json(s_queries[i].stop_id);
+            cached[i] = json;
+        }
         if (!json) {
             continue;
         }
         if (parse_first_match(json, &s_queries[i], &fresh[i])) {
             any = true;
         }
-        free(json);
+        (void)borrowed;
+    }
+
+    for (int i = 0; i < DEPARTURES_MAX; i++) {
+        free(cached[i]);
     }
 
     xSemaphoreTake(s_mutex, portMAX_DELAY);
@@ -232,7 +258,9 @@ static void refresh_once(void)
 
     for (int i = 0; i < DEPARTURES_MAX; i++) {
         if (fresh[i].valid) {
-            ESP_LOGI(TAG, "%s %s +%d", fresh[i].line, fresh[i].time, fresh[i].delay_min);
+            ESP_LOGI(TAG, "%s%s%s %s +%d", fresh[i].line,
+                     fresh[i].dir[0] ? " " : "", fresh[i].dir,
+                     fresh[i].time, fresh[i].delay_min);
         }
     }
 }

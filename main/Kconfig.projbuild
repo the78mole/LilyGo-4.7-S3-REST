@@ -129,16 +129,18 @@ menu "LilyGo T5-4.7 S3 Application"
     endmenu
 
     menu "Public Transport (VGN EFA)"
+        # Defaults mirror the reference implementation in
+        # the78mole/Playground/vgn-abfahrten/vgn_abfahrten.py, including its
+        # tag strings. Note entries 1 and 2 are the same stop and line in
+        # opposite directions -- which is exactly why the label exists.
         config APP_DEP1_STOP
             string "Departure 1: EFA stop id"
             default "3003410"
             help
                 3003410 = Bruck (Erlangen), Bahnhof.
-
         config APP_DEP1_LINE
             string "Departure 1: line number"
             default "S1"
-
         config APP_DEP1_DIR
             string "Departure 1: EFA direction code (H/R)"
             default "H"
@@ -147,20 +149,37 @@ menu "LilyGo T5-4.7 S3 Application"
                 than the displayed destination, which varies with short
                 workings (Lauf, Hartmannshof, ... all being "towards
                 Nuremberg").
+        config APP_DEP1_LABEL
+            string "Departure 1: badge label"
+            default "S1-NBG"
 
         config APP_DEP2_STOP
             string "Departure 2: EFA stop id"
+            default "3003410"
+        config APP_DEP2_LINE
+            string "Departure 2: line number"
+            default "S1"
+        config APP_DEP2_DIR
+            string "Departure 2: EFA direction code (H/R)"
+            default "R"
+        config APP_DEP2_LABEL
+            string "Departure 2: badge label"
+            default "S1-BBG"
+
+        config APP_DEP3_STOP
+            string "Departure 3: EFA stop id"
             default "3003463"
             help
                 3003463 = Bruck (Erlangen), Bachfeldstr.
-
-        config APP_DEP2_LINE
-            string "Departure 2: line number"
+        config APP_DEP3_LINE
+            string "Departure 3: line number"
             default "285"
-
-        config APP_DEP2_DIR
-            string "Departure 2: EFA direction code (H/R)"
+        config APP_DEP3_DIR
+            string "Departure 3: EFA direction code (H/R)"
             default "H"
+        config APP_DEP3_LABEL
+            string "Departure 3: badge label"
+            default "285"
 
         config APP_DEP_REFRESH_S
             int "Refresh interval (seconds)"
