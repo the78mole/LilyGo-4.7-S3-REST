@@ -245,7 +245,17 @@ static void spark_bars(ui_card_t *card, int x, int y, int w, int h,
         }
     }
 
-    ui_card_text(card, x + w - 34, py - 2, 36, "100%", UI_DARK, &lv_font_montserrat_14);
+    /* Label the actual 24h maximum, not the axis ceiling: a hard-coded "100%"
+     * sitting next to the title reads as a measured value and made a
+     * rain-free forecast look like a certain downpour. The bars themselves
+     * stay on the fixed 0..100 scale, with the dashed 50% line as reference. */
+    float pmax = v[0];
+    for (int i = 1; i < n; i++) {
+        if (v[i] > pmax) pmax = v[i];
+    }
+    char maxbuf[24];
+    snprintf(maxbuf, sizeof(maxbuf), "max %.0f%%", pmax);
+    ui_card_text(card, x + w - 60, py - 2, 62, maxbuf, UI_DARK, &lv_font_montserrat_14);
 }
 
 esp_err_t widget_weather_draw(const widget_weather_spec_t *spec)
@@ -288,6 +298,7 @@ esp_err_t widget_weather_draw(const widget_weather_spec_t *spec)
     if (spec->has_precip_prob) {
         snprintf(buf, sizeof(buf), "%.0f %%", spec->precip_prob);
         ui_card_text(&card, 0, ky, 96, "Regenrisiko", UI_MID, &lv_font_montserrat_14);
+        /* value is the 24h maximum -- see build_weather_payload() */
         ui_card_text(&card, 100, ky, 110, buf, UI_BLACK, &lv_font_montserrat_14);
         ky += kv_step;
     }
