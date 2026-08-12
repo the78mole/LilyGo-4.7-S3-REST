@@ -18,6 +18,12 @@ fit this hardware.
 | `touch.cpp`, `touch.h` | depend on `Arduino.h`; touch is unused here |
 | `font.c` + font headers | pull in `zlib/zlib.h`, which Arduino ships but ESP-IDF does not. Text is rendered by LVGL, and no other translation unit references these symbols. |
 
+**Local modifications** to the vendored sources:
+
+| Change | Why |
+|---|---|
+| `epd_driver.c`: `provide_out` task priority 10 → 24 (`EPD_PROVIDE_OUT_PRIO`) | The producer runs on core 0 alongside Wi-Fi (23), esp_timer (22) and lwIP (18); at priority 10 it gets preempted, stalling the consumer's blocking `xQueueReceive` mid-frame. The panel holds a row only by residual charge, so a stall shifts rows by several pixels, differently per pass — a smeared, doubled image. Areas ≤64 rows were unaffected because the queue is 64 rows deep. |
+
 See `CMakeLists.txt` for the build wiring, including the workaround for an
 upstream `ESP_IDF_VERSION_MAJOR` include-order bug.
 

@@ -813,6 +813,27 @@ void IRAM_ATTR epd_draw_frame_1bit(Rect_t area, uint8_t *ptr,
 }
 
 
+/*
+ * LOCAL MODIFICATION (not upstream) -- see components/lilygo_epd47/README.md.
+ *
+ * provide_out() runs on core 0 and fills output_queue; feed_display() runs on
+ * core 1 and drains it with a blocking receive *in the middle of a panel
+ * frame*. Core 0 is also where Wi-Fi (prio 23), esp_timer (22) and lwIP (18)
+ * live, so at the upstream priority of 10 the producer loses the CPU to them
+ * and the consumer stalls mid-frame. The panel only holds a row by its
+ * residual charge, so a stall shows up as rows landing several pixels off,
+ * differently for each of the 15 passes -- a smeared, doubled image.
+ *
+ * The queue is 64 rows deep, which is why areas up to 64 rows tall are
+ * unaffected: the producer fills the whole area before output starts.
+ *
+ * Raising the producer above those tasks cannot monopolise core 0: it blocks
+ * on xQueueSendToBack() as soon as the queue is full, so its work is bounded
+ * by what the consumer has already taken.
+ */
+#define EPD_PROVIDE_OUT_PRIO 24 /* above Wi-Fi (23), esp_timer (22), lwIP (18) */
+#define EPD_FEED_DISPLAY_PRIO 10 /* upstream value; core 1 has no such contenders */
+
 void IRAM_ATTR epd_draw_image(Rect_t area, uint8_t *data, DrawMode_t mode)
 {
     uint8_t frame_count = 15;
@@ -839,9 +860,9 @@ void IRAM_ATTR epd_draw_image(Rect_t area, uint8_t *data, DrawMode_t mode)
 
         TaskHandle_t t1, t2;
         xTaskCreatePinnedToCore((void (*)(void *))provide_out, "privide_out", 8192,
-                                &p1, 10, &t1, 0);
+                                &p1, EPD_PROVIDE_OUT_PRIO, &t1, 0);
         xTaskCreatePinnedToCore((void (*)(void *))feed_display, "render", 8192, &p2,
-                                10, &t2, 1);
+                                EPD_FEED_DISPLAY_PRIO, &t2, 1);
 
         xSemaphoreTake(fetch_sem, portMAX_DELAY);
         xSemaphoreTake(feed_sem, portMAX_DELAY);
