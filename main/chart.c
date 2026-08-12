@@ -119,7 +119,11 @@ esp_err_t chart_draw(const chart_spec_t *spec)
     float avg = sum / spec->count;
 
     /* Fixed axis: comparability across days beats making each chart fill its
-     * box. Guard against a degenerate range coming in over REST. */
+     * box. The ceiling is a decision threshold rather than a display range --
+     * above it nothing large should be switched on regardless of the actual
+     * price, so clipping loses no actionable information. The title bar still
+     * shows the true current value. Guard against a degenerate range coming
+     * in over REST. */
     float lo = spec->y_min;
     float hi = spec->y_max;
     if (!(hi > lo)) {

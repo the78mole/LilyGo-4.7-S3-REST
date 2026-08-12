@@ -148,6 +148,14 @@ case. Everything else has a firmware-side default (`Kconfig` → *Time / Chart*)
   than auto-scaling, so a curve looks the same height on a cheap day as on an
   expensive one. Values above the maximum are clamped *and* flagged with a
   marker, so an outlier can never masquerade as exactly `y_max`.
+
+  The ceiling is deliberately a **decision threshold, not a display range**:
+  above ~60 ct/kWh you should not be starting a dishwasher or planning to bake
+  bread anyway, so how far an outlier overshoots carries no information worth
+  screen space — the curve below stays legible instead. Clipped bars are
+  therefore expected behaviour, not a bug to be fixed by raising the ceiling;
+  the current-price readout in the title bar still reports the true figure
+  (which is why it can read "jetzt 72.7 ct" above a bar clipped at 60).
 - **`CONFIG_APP_CHART_INTERVAL_MIN`** (default 15 → 96 slots/day), matching
   quarter-hourly dynamic tariffs.
 - **Cell geometry** from `"slot": "today" | "tomorrow"`, which picks the

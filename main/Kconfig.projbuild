@@ -88,8 +88,18 @@ menu "LilyGo T5-4.7 S3 Application"
             default 60
             help
                 The y axis is fixed at 0..this value rather than auto-scaled,
-                so charts stay comparable between days. Values above it are
-                clamped and flagged with a marker.
+                so charts stay comparable between days.
+
+                This is a DECISION THRESHOLD, not a display range: above it
+                you should not be starting a dishwasher or planning to bake
+                bread anyway, so the exact height of an outlier carries no
+                information worth screen space. Values above are clamped and
+                flagged with a marker; the current-price readout in the title
+                bar still reports the true figure.
+
+                Do not "fix" clipped bars by raising this -- clipping is the
+                intended behaviour. Raise it only if the threshold at which
+                you change your own behaviour actually changes.
 
         config APP_CHART_INTERVAL_MIN
             int "Minutes per chart slot"
