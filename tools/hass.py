@@ -343,10 +343,14 @@ def build_agenda_payload(hass: Hass, slot: str = "top-left", hours: int = 48) ->
         seen.add(letter)
         ts, _ = _event_start(ev)
         days_away = (ts.date() - today).days
+        # Weekday only -- the day-of-month was wider than the 20px badge it
+        # sits under and got clipped, and "Fr" already answers the question.
         # A weekday name is ambiguous beyond a week ("Mo" could be either
         # Monday), so anything a week or more out is marked "+W" instead.
-        prefix = "+W" if days_away >= 7 else _WEEKDAYS[ts.weekday()]
-        waste.append({"letter": letter, "label": f"{prefix} {ts.day}."})
+        waste.append({
+            "letter": letter,
+            "label": "+W" if days_away >= 7 else _WEEKDAYS[ts.weekday()],
+        })
         if len(waste) >= 4:
             break
 

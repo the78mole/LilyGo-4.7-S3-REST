@@ -164,10 +164,11 @@ HOMEASSISTANT_TOKEN=<long-lived access token>
 
 - **Waste collection** (`calendar.birkenweg_...`): one badge per bin type
   showing that type's *next* pickup — **R**estmüll, **G**elber Sack,
-  **B**iomüll, **P**apier — each with its weekday and date. Listing the
+  **B**iomüll, **P**apier — each labelled with its weekday. Listing the
   nearest four dates instead would show the same bin twice while hiding the
   types further out. A pickup a week or more away is labelled `+W` instead of
-  a weekday, since a weekday name is ambiguous beyond seven days.
+  a weekday, since a weekday name is ambiguous beyond seven days. No
+  day-of-month: it was wider than the badge above it and got clipped.
 
 - `weather.get_forecasts` (`hourly`, also accepts `daily` / `twice_daily`) plus
   the entity state, condensed into current conditions, today's min/max, 24h
