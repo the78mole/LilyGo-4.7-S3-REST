@@ -218,6 +218,21 @@ menu "LilyGo T5-4.7 S3 Application"
                 one-minute strip update that is a full clean-up every half
                 hour.
 
+        config APP_PARTIAL_Y_SHIFT
+            int "Vertical correction for partial updates (pixels)"
+            default 1
+            range -2 2
+            help
+                epd_push_pixels() (used by epd_clear_area) emits height+1 rows
+                because it explicitly latches out the pipelined last row,
+                while epd_draw_image() emits exactly height and ends the frame
+                immediately. The two therefore land one row apart, which shows
+                up as a partial update sitting a pixel above its cleared area.
+
+                This shifts the drawn rectangle to compensate. Determined
+                empirically on hardware -- set to 0 if a future driver version
+                makes the two paths symmetric.
+
         config APP_LVGL_TICK_PERIOD_MS
             int "LVGL tick period (ms)"
             default 5

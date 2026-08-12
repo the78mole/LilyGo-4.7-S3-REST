@@ -8,6 +8,47 @@
 
 static const char *TAG = "ui_card";
 
+/*
+ * Canvases are cached per screen position and reused.
+ *
+ * Without this every dashboard push created a fresh canvas stacked on top of
+ * the previous one: it leaked an LVGL object plus its PSRAM buffer each time,
+ * and -- worse -- it buried older objects. The transit strip created at boot
+ * ended up underneath the newer agenda card, so repainting it once a minute
+ * had no visible effect at all.
+ */
+#define UI_CARD_CACHE 6
+
+typedef struct {
+    int x, y, w, h;
+    lv_obj_t *canvas;
+    lv_color_t *buf;
+    bool used;
+} card_slot_t;
+
+static card_slot_t s_slots[UI_CARD_CACHE];
+
+static card_slot_t *slot_for(int x, int y, int w, int h)
+{
+    for (int i = 0; i < UI_CARD_CACHE; i++) {
+        if (s_slots[i].used && s_slots[i].x == x && s_slots[i].y == y) {
+            if (s_slots[i].w == w && s_slots[i].h == h) {
+                return &s_slots[i];   /* reuse as-is */
+            }
+            /* Same position, different size -- drop and rebuild. */
+            lv_obj_del(s_slots[i].canvas);
+            heap_caps_free(s_slots[i].buf);
+            s_slots[i].used = false;
+        }
+    }
+    for (int i = 0; i < UI_CARD_CACHE; i++) {
+        if (!s_slots[i].used) {
+            return &s_slots[i];
+        }
+    }
+    return NULL;
+}
+
 #define PANEL_W 960
 #define PANEL_H 540
 
@@ -33,26 +74,37 @@ esp_err_t ui_card_begin(ui_card_t *card, int x, int y, int w, int h, const char 
     }
     memset(card, 0, sizeof(*card));
 
-    size_t buf_bytes = (size_t)w * h * sizeof(lv_color_t);
-    card->buf = heap_caps_malloc(buf_bytes, MALLOC_CAP_SPIRAM);
-    if (!card->buf) {
-        ESP_LOGE(TAG, "canvas alloc failed (%u bytes)", (unsigned)buf_bytes);
+    card_slot_t *slot = slot_for(x, y, w, h);
+    if (!slot) {
+        ESP_LOGE(TAG, "no free canvas slot for (%d,%d)", x, y);
         return ESP_ERR_NO_MEM;
     }
 
-    card->canvas = lv_canvas_create(lv_scr_act());
-    if (!card->canvas) {
-        heap_caps_free(card->buf);
-        card->buf = NULL;
-        return ESP_ERR_NO_MEM;
+    if (!slot->used) {
+        size_t buf_bytes = (size_t)w * h * sizeof(lv_color_t);
+        slot->buf = heap_caps_malloc(buf_bytes, MALLOC_CAP_SPIRAM);
+        if (!slot->buf) {
+            ESP_LOGE(TAG, "canvas alloc failed (%u bytes)", (unsigned)buf_bytes);
+            return ESP_ERR_NO_MEM;
+        }
+        slot->canvas = lv_canvas_create(lv_scr_act());
+        if (!slot->canvas) {
+            heap_caps_free(slot->buf);
+            slot->buf = NULL;
+            return ESP_ERR_NO_MEM;
+        }
+        /* Position BEFORE giving the object any size or content. LVGL creates
+         * objects at (0,0), and lv_obj_set_pos() invalidates both the old and
+         * the new area -- so positioning last makes every widget dirty the
+         * region back to the screen origin, defeating partial refresh. */
+        lv_obj_set_pos(slot->canvas, x, y);
+        lv_canvas_set_buffer(slot->canvas, slot->buf, w, h, LV_IMG_CF_TRUE_COLOR);
+        slot->x = x; slot->y = y; slot->w = w; slot->h = h;
+        slot->used = true;
     }
 
-    /* Position BEFORE giving the object any size or content. LVGL creates
-     * objects at (0,0), and lv_obj_set_pos() invalidates both the old and the
-     * new area -- so positioning last makes every single widget dirty the
-     * region from the screen origin, which defeats partial panel refresh. */
-    lv_obj_set_pos(card->canvas, x, y);
-    lv_canvas_set_buffer(card->canvas, card->buf, w, h, LV_IMG_CF_TRUE_COLOR);
+    card->canvas = slot->canvas;
+    card->buf = slot->buf;
     lv_canvas_fill_bg(card->canvas, UI_WHITE, LV_OPA_COVER);
 
     card->w = w;
