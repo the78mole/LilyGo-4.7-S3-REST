@@ -1,5 +1,6 @@
 #include "departures.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -14,6 +15,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
+#include "time_sync.h"
 
 static const char *TAG = "departures";
 
@@ -229,6 +231,38 @@ static bool parse_first_match(const char *json, const query_t *q, departure_t *o
 
 /* -------------------------------------------------------------- refresh --- */
 
+/*
+ * How far ahead a cached departure may lie and still count as "not yet gone".
+ * Departures are stored as local "HH:MM" with no date, so "in the future" has
+ * to be decided inside a window rather than absolutely -- which conveniently
+ * also handles the midnight wrap (23:58 now, 00:05 departure) without carrying
+ * a date around. Three hours is far beyond anything the monitor returns.
+ */
+#define KEEP_AHEAD_MIN 180
+
+static bool still_ahead(const departure_t *d)
+{
+    if (!d->valid || !time_sync_is_valid()) {
+        return false;  /* without a trusted clock, keeping it is a guess */
+    }
+    int hh = 0, mm = 0;
+    if (sscanf(d->time, "%d:%d", &hh, &mm) != 2) {
+        return false;
+    }
+
+    time_t now = 0;
+    time(&now);
+    struct tm lt;
+    localtime_r(&now, &lt);
+
+    /* Delay included: a train at 10:00 running 8 minutes late is still ahead
+     * at 10:05. Cancelled entries keep their planned time, so they stay on
+     * screen as AUSFALL until that time passes. */
+    int dep_min = ((hh * 60 + mm + d->delay_min) % 1440 + 1440) % 1440;
+    int now_min = lt.tm_hour * 60 + lt.tm_min;
+    return ((dep_min - now_min + 1440) % 1440) <= KEEP_AHEAD_MIN;
+}
+
 static void refresh_once(void)
 {
     departure_t fresh[DEPARTURES_MAX] = {0};
@@ -270,7 +304,19 @@ static void refresh_once(void)
     }
 
     xSemaphoreTake(s_mutex, portMAX_DELAY);
-    memcpy(s_cache, fresh, sizeof(s_cache));
+    for (int i = 0; i < DEPARTURES_MAX; i++) {
+        /* A failed fetch must not erase a departure that has not left yet:
+         * one network hiccup would otherwise blank the line until the next
+         * successful poll (observed as the 285 dropping to "--:--"). Once the
+         * cached departure is in the past it is dropped, so the panel can
+         * never show a service that has already gone. */
+        if (!fresh[i].valid && still_ahead(&s_cache[i])) {
+            ESP_LOGD(TAG, "%s: fetch failed, keeping cached %s",
+                     s_queries[i].line, s_cache[i].time);
+            continue;
+        }
+        s_cache[i] = fresh[i];
+    }
     if (any) {
         time(&s_last_ok);
     }

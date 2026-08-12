@@ -32,8 +32,13 @@ esp_err_t departures_start(void);
 
 /*
  * Copies up to `max` cached entries into `out`, returning how many were
- * written. Entries whose service was not found carry valid == false so the
- * caller can render a placeholder rather than a stale time.
+ * written. Entries carry valid == false when no departure is known, so the
+ * caller renders a placeholder rather than a stale time.
+ *
+ * A failed fetch does not by itself invalidate an entry: a departure that has
+ * not left yet (delay included) survives until its time has passed, so a
+ * transient network failure no longer blanks the line. Anything already gone
+ * is dropped, so a shown time is never in the past.
  */
 int departures_get(departure_t *out, int max);
 
