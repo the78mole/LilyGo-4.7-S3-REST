@@ -162,6 +162,13 @@ HOMEASSISTANT_TOKEN=<long-lived access token>
   cached copy, and a service with no match renders `--:--` rather than a stale
   time.
 
+- **Wi-Fi signal** — read from the device itself (`esp_wifi_sta_get_ap_info`),
+  shown between the departures and the waste badges as four rising bars plus
+  the raw dBm value. Bars rather than the usual arcs: at this size arcs are
+  1–2px strokes that smear on e-paper. Unreached bars are outlined so a weak
+  signal is distinguishable from a half-drawn icon. Thresholds: −55/−65/−75/−85
+  dBm for 4/3/2/1 bars.
+
 - **Waste collection** (`calendar.birkenweg_...`): one badge per bin type
   showing that type's *next* pickup — **R**estmüll, **G**elber Sack,
   **B**iomüll, **P**apier — each labelled with its weekday. Listing the

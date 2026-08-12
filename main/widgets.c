@@ -5,6 +5,7 @@
 
 #include "esp_log.h"
 #include "departures.h"
+#include "wifi_manager.h"
 #include "ui_card.h"
 
 static const char *TAG = "widgets";
@@ -105,6 +106,39 @@ static void fit_text(char *dst, size_t dst_sz, const char *src,
             return;
         }
     }
+}
+
+/* Signal strength as four rising bars rather than the usual arcs: at this
+ * size arcs are 1-2px strokes that smear on e-paper, whereas solid bars stay
+ * crisp. Empty bars are outlined so "weak" is distinguishable from "the icon
+ * is only half drawn". Returns the width used. */
+#define WIFI_ICON_W 22
+
+static int draw_wifi(ui_card_t *card, int x, int y, int rssi)
+{
+    const int bars = 4, bw = 4, gap = 2, base = y + 20;
+    int level;
+    if (rssi == 0)        level = 0;   /* sentinel: not connected */
+    else if (rssi >= -55) level = 4;
+    else if (rssi >= -65) level = 3;
+    else if (rssi >= -75) level = 2;
+    else if (rssi >= -85) level = 1;
+    else                  level = 0;
+
+    for (int i = 0; i < bars; i++) {
+        int h = 6 + i * 4;
+        int bx = x + i * (bw + gap);
+        if (i < level) {
+            ui_card_rect(card, bx, base - h, bw, h, UI_BLACK);
+        } else {
+            /* Outline only -- shows the bar exists but is not reached. */
+            ui_card_rect(card, bx, base - h, bw, 1, UI_LIGHT);
+            ui_card_rect(card, bx, base - 1, bw, 1, UI_LIGHT);
+            ui_card_rect(card, bx, base - h, 1, h, UI_LIGHT);
+            ui_card_rect(card, bx + bw - 1, base - h, 1, h, UI_LIGHT);
+        }
+    }
+    return WIFI_ICON_W;
 }
 
 esp_err_t widget_agenda_draw(const widget_agenda_spec_t *spec)
@@ -232,8 +266,31 @@ esp_err_t widget_agenda_draw(const widget_agenda_spec_t *spec)
         shown++;
     }
 
+    /* Signal strength sits in the gap between departures and waste badges.
+     * Only drawn if it genuinely fits -- crowding it in would overlap one of
+     * its neighbours, and the neighbours carry more information. */
+    int rssi = wifi_manager_rssi();
+    char rssi_txt[16];
+    if (rssi == 0) {
+        strlcpy(rssi_txt, "--", sizeof(rssi_txt));
+    } else {
+        snprintf(rssi_txt, sizeof(rssi_txt), "%d", rssi);
+    }
+    int rssi_w = lv_txt_get_width(rssi_txt, strlen(rssi_txt), &lv_font_montserrat_14,
+                                  0, LV_TEXT_FLAG_NONE);
+    int icon_w = WIFI_ICON_W > rssi_w ? WIFI_ICON_W : rssi_w;
+    int free_from = dx;
+    int free_to = waste_left - 10;
+    if (free_to - free_from >= icon_w) {
+        int ix = free_from + (free_to - free_from - icon_w) / 2;
+        draw_wifi(&card, ix + (icon_w - WIFI_ICON_W) / 2, strip_y, rssi);
+        ui_card_text(&card, ix, strip_y + 22, icon_w + 8, rssi_txt, UI_MID,
+                     &lv_font_montserrat_14);
+    }
+
     ESP_LOGI(TAG, "agenda '%s': %d events, %d todos, %d waste, %d departures",
              spec->title, n_ev, n_td, n_w, shown);
+    ESP_LOGI(TAG, "agenda: wifi rssi=%d dBm", rssi);
     return ESP_OK;
 }
 

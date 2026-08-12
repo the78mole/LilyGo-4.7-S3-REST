@@ -104,3 +104,12 @@ bool wifi_manager_is_connected(void)
 {
     return s_connected;
 }
+
+int wifi_manager_rssi(void)
+{
+    wifi_ap_record_t ap;
+    if (!s_connected || esp_wifi_sta_get_ap_info(&ap) != ESP_OK) {
+        return 0;
+    }
+    return ap.rssi;
+}

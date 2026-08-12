@@ -17,6 +17,13 @@ esp_err_t wifi_manager_start(void);
 
 bool wifi_manager_is_connected(void);
 
+/*
+ * Current RSSI of the associated AP in dBm (a negative number), or 0 when
+ * not connected / unavailable -- 0 is not a plausible real reading, so it
+ * doubles as the "no signal" sentinel.
+ */
+int wifi_manager_rssi(void);
+
 #ifdef __cplusplus
 }
 #endif
