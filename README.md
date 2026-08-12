@@ -90,7 +90,8 @@ paint into until one exists.
 Two things go stale on their own and are refreshed by the device, without a
 client push (`ui_tick.c`):
 
-- **every minute** — the departure strip and Wi-Fi signal
+- **every minute** — the departure strip, Wi-Fi signal, and the date/clock
+  block beside it (`DD.MM.` over `hh:mm`)
 - **every quarter hour** — today's price chart, to move the "now" marker onto
   the current slot
 

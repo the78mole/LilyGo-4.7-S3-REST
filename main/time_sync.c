@@ -77,3 +77,19 @@ void time_sync_format_hhmm(char *out, size_t out_len)
     localtime_r(&now, &lt);
     snprintf(out, out_len, "%02d:%02d", lt.tm_hour, lt.tm_min);
 }
+
+void time_sync_format_ddmm(char *out, size_t out_len)
+{
+    if (out_len < 7) {
+        return;
+    }
+    if (!time_sync_is_valid()) {
+        strlcpy(out, "--.--.", out_len);
+        return;
+    }
+    time_t now = 0;
+    time(&now);
+    struct tm lt;
+    localtime_r(&now, &lt);
+    snprintf(out, out_len, "%02d.%02d.", lt.tm_mday, lt.tm_mon + 1);
+}

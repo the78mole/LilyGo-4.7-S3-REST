@@ -5,6 +5,7 @@
 
 #include "esp_log.h"
 #include "departures.h"
+#include "time_sync.h"
 #include "wifi_manager.h"
 #include "esp_heap_caps.h"
 #include "ui_card.h"
@@ -198,17 +199,45 @@ static int draw_transit(ui_card_t *card, int strip_y, int avail_w)
     } else {
         snprintf(rssi_txt, sizeof(rssi_txt), "%d", rssi);
     }
+
+    char date_txt[12], clock_txt[8];
+    time_sync_format_ddmm(date_txt, sizeof(date_txt));
+    time_sync_format_hhmm(clock_txt, sizeof(clock_txt));
+
+    /* Wi-Fi block (bars over dBm) and date/clock block (date over time) sit
+     * side by side, and the pair is centred in whatever space the departures
+     * left. Each block's two lines are centred against each other, so the
+     * narrower line sits under the middle of the wider one. */
     int rssi_w = lv_txt_get_width(rssi_txt, strlen(rssi_txt), &lv_font_montserrat_14,
                                   0, LV_TEXT_FLAG_NONE);
-    int icon_w = WIFI_ICON_W > rssi_w ? WIFI_ICON_W : rssi_w;
+    int wifi_w = WIFI_ICON_W > rssi_w ? WIFI_ICON_W : rssi_w;
+
+    int date_w = lv_txt_get_width(date_txt, strlen(date_txt), &lv_font_montserrat_14,
+                                  0, LV_TEXT_FLAG_NONE);
+    int clock_w = lv_txt_get_width(clock_txt, strlen(clock_txt), &lv_font_montserrat_18,
+                                   0, LV_TEXT_FLAG_NONE);
+    int dt_w = date_w > clock_w ? date_w : clock_w;
+
+    const int block_gap = 16;
+    int total_w = wifi_w + block_gap + dt_w;
     int free_to = avail_w;
-    if (free_to - dx >= icon_w) {
-        int ix = dx + (free_to - dx - icon_w) / 2;
-        draw_wifi(card, ix + (icon_w - WIFI_ICON_W) / 2, strip_y, rssi);
-        ui_card_text(card, ix, strip_y + 22, icon_w + 8, rssi_txt, UI_MID,
-                     &lv_font_montserrat_14);
+    if (free_to - dx >= total_w) {
+        int bx = dx + (free_to - dx - total_w) / 2;
+
+        draw_wifi(card, bx + (wifi_w - WIFI_ICON_W) / 2, strip_y, rssi);
+        ui_text_ex(card->canvas, card->cx0 + bx, card->cy0 + strip_y + 22, wifi_w,
+                   rssi_txt, UI_MID, &lv_font_montserrat_14, LV_TEXT_ALIGN_CENTER, false);
+
+        int dtx = bx + wifi_w + block_gap;
+        ui_text_ex(card->canvas, card->cx0 + dtx, card->cy0 + strip_y + 2, dt_w,
+                   date_txt, UI_MID, &lv_font_montserrat_14, LV_TEXT_ALIGN_CENTER, false);
+        /* Clock a size larger and nudged up, so its larger glyphs still sit on
+         * the same visual line as the departure times beside it. */
+        ui_text_ex(card->canvas, card->cx0 + dtx, card->cy0 + strip_y + 19, dt_w,
+                   clock_txt, UI_BLACK, &lv_font_montserrat_18, LV_TEXT_ALIGN_CENTER, true);
     }
-    ESP_LOGI(TAG, "transit: %d departures, rssi=%d dBm", shown, rssi);
+    ESP_LOGI(TAG, "transit: %d departures, rssi=%d dBm, %s %s",
+             shown, rssi, date_txt, clock_txt);
     return shown;
 }
 

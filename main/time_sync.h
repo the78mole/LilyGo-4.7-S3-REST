@@ -32,6 +32,9 @@ int time_sync_current_slot(int interval_min);
 /* "HH:MM" in local time, or "--:--" when unsynchronised. Buffer >= 6 bytes. */
 void time_sync_format_hhmm(char *out, size_t out_len);
 
+/* "DD.MM." in local time, or "--.--." when unsynchronised. Buffer >= 7 bytes. */
+void time_sync_format_ddmm(char *out, size_t out_len);
+
 #ifdef __cplusplus
 }
 #endif
