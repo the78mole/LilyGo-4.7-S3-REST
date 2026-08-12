@@ -20,6 +20,11 @@ Commands:
     dashboard                       Render the 2x2 pseudo dashboard
                                      (tasks / weather / power prices) and
                                      push it as one full-screen image.
+    ota [FIRMWARE.bin]              Push a firmware image into the inactive
+                                     A/B slot and reboot into it. Defaults to
+                                     ../build/lilygo_epd47_display.bin.
+    ota-status                      Show the running slot, version and
+                                     whether a rollback is still pending.
 """
 
 from __future__ import annotations
@@ -58,6 +63,32 @@ class EpdClient:
         chunk by chunk, and the firmware writes each chunk straight to
         the SD card as it arrives."""
         self._post("/api/upload", params={"filename": filename}, data=data)
+
+    def ota_status(self) -> dict:
+        resp = self.session.get(f"{self.base_url}/api/ota/status", timeout=DEFAULT_TIMEOUT)
+        if not resp.ok:
+            raise EpdClientError(f"GET /api/ota/status -> HTTP {resp.status_code}: {resp.text}")
+        return resp.json()
+
+    def ota(self, data: io.BufferedIOBase, size: int) -> dict:
+        """Streams a firmware image into the inactive OTA slot.
+
+        Content-Length is set explicitly: the firmware needs the total size up
+        front for esp_ota_begin(), and requests would otherwise use chunked
+        transfer encoding for a file object, which leaves content_len at 0.
+
+        The timeout is raised well above DEFAULT_TIMEOUT because writing ~1.4 MB
+        to flash takes considerably longer than a display push."""
+        resp = self.session.post(
+            f"{self.base_url}/api/ota",
+            data=data,
+            headers={"Content-Length": str(size),
+                     "Content-Type": "application/octet-stream"},
+            timeout=180,
+        )
+        if not resp.ok:
+            raise EpdClientError(f"POST /api/ota -> HTTP {resp.status_code}: {resp.text}")
+        return resp.json()
 
     def display_image(self, filename: str, x: int, y: int) -> None:
         self._post("/api/display/image", json={"filename": filename, "x": x, "y": y})
@@ -270,12 +301,55 @@ def cmd_upload_demo(client: EpdClient, args: argparse.Namespace) -> None:
     print("Placed demo text at (40, 260)")
 
 
+DEFAULT_FIRMWARE = Path(__file__).resolve().parent.parent / \
+    "build" / "lilygo_epd47_display.bin"
+
+
+def cmd_ota_status(client: EpdClient, args: argparse.Namespace) -> None:
+    s = client.ota_status()
+    print(f"running slot : {s['running']}"
+          f"{'  (PENDING VERIFY -- will roll back on reset)' if s['pending_verify'] else ''}")
+    print(f"next slot    : {s['next']} ({s['slot_size'] // 1024} KiB)")
+    print(f"version      : {s['version']}  (built {s['built']}, IDF {s['idf']})")
+
+
+def cmd_ota(client: EpdClient, args: argparse.Namespace) -> None:
+    path = Path(args.firmware) if args.firmware else DEFAULT_FIRMWARE
+    if not path.is_file():
+        raise EpdClientError(f"firmware not found: {path}")
+
+    size = path.stat().st_size
+    before = client.ota_status()
+    if size > before["slot_size"]:
+        raise EpdClientError(
+            f"image is {size} bytes but slot '{before['next']}' holds only "
+            f"{before['slot_size']}")
+
+    print(f"running  : {before['running']} ({before['version']})")
+    print(f"uploading: {path.name}, {size / 1024:.0f} KiB -> {before['next']}")
+
+    with path.open("rb") as fh:
+        result = client.ota(fh, size)
+
+    print(f"written  : {result['bytes']} bytes to {result['slot']}")
+    print(f"rebooting in {result['reboot_in_ms']} ms; the new image must reach "
+          f"Wi-Fi + REST to confirm itself, otherwise the next reset rolls back.")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--host", required=True, help="Device hostname or IP address")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
 
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p_ota = sub.add_parser("ota", help="Push a firmware image into the inactive A/B slot")
+    p_ota.add_argument("firmware", nargs="?",
+                       help=f"Firmware .bin (defaults to {DEFAULT_FIRMWARE})")
+    p_ota.set_defaults(func=cmd_ota)
+
+    p_otast = sub.add_parser("ota-status", help="Show running slot, version and rollback state")
+    p_otast.set_defaults(func=cmd_ota_status)
 
     p_upload = sub.add_parser("upload", help="Upload a raw file to the SD card")
     p_upload.add_argument("file", help="Local file to upload")

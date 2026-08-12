@@ -13,6 +13,7 @@ idf_component_register(
         "time_sync.c"
         "departures.c"
         "ui_tick.c"
+        "ota.c"
     INCLUDE_DIRS "."
     REQUIRES
         esp_wifi
@@ -29,6 +30,7 @@ idf_component_register(
         lwip
         esp_http_client
         esp-tls
+        app_update
         mbedtls
         # Managed component pulled in via idf_component.yml.
         lvgl

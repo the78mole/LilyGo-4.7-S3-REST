@@ -4,6 +4,7 @@
 #include "app_config.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "ota.h"
 #include "sdkconfig.h"
 
 static const char *TAG = "http_server";
@@ -15,6 +16,11 @@ esp_err_t http_server_start(void)
     config.core_id = APP_NETWORK_CORE;
     config.stack_size = 8192;
     config.uri_match_fn = httpd_uri_match_wildcard;
+    /* Defaults to 8, which the route table below has already outgrown --
+     * registration then fails with ESP_ERR_HTTPD_HANDLERS_FULL and the
+     * ESP_ERROR_CHECK turns that into a boot loop. Keep this comfortably
+     * above the number of routes. */
+    config.max_uri_handlers = 16;
     /* Body sizes are validated per-handler against req->content_len /
      * CONFIG_APP_HTTP_MAX_UPLOAD_BYTES; httpd itself just needs enough
      * head-room for the largest declared Content-Length it will parse. */
@@ -68,6 +74,16 @@ esp_err_t http_server_start(void)
             .uri = "/api/display/chart",
             .method = HTTP_POST,
             .handler = api_display_chart_handler,
+        },
+        {
+            .uri = "/api/ota",
+            .method = HTTP_POST,
+            .handler = api_ota_handler,
+        },
+        {
+            .uri = "/api/ota/status",
+            .method = HTTP_GET,
+            .handler = api_ota_status_handler,
         },
     };
 

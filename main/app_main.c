@@ -4,6 +4,7 @@
 #include "display_manager.h"
 #include "http_server.h"
 #include "lvgl_port.h"
+#include "ota.h"
 #include "sd_card.h"
 #include "departures.h"
 #include "time_sync.h"
@@ -21,6 +22,10 @@ void app_main(void)
      * epd_init() alone is enough to break it -- no panel power-on or refresh
      * required -- so this is a peripheral/DMA init-order constraint, not a
      * current-draw brownout. */
+    /* First thing logged, so the serial output identifies which slot booted
+     * even when start-up fails further down. */
+    ota_report_boot_state();
+
     ESP_LOGI(TAG, "Initializing e-paper panel...");
     ESP_ERROR_CHECK(display_manager_init());
 
@@ -54,6 +59,18 @@ void app_main(void)
 
     ESP_LOGI(TAG, "Starting REST API...");
     ESP_ERROR_CHECK(http_server_start());
+
+    /* Confirm the image only now. Reaching this line means Wi-Fi associated
+     * and the update endpoint is listening, i.e. this firmware can be replaced
+     * over the air -- which is exactly the property that makes keeping it
+     * safe. Anything that fails earlier leaves the image unconfirmed, and the
+     * bootloader returns to the previous slot on the next reset. */
+    if (wifi_manager_is_connected()) {
+        ota_mark_valid();
+    } else {
+        ESP_LOGW(TAG, "no Wi-Fi -- leaving the image unconfirmed so a reset "
+                      "rolls back to the previous firmware");
+    }
 
     /* Keeps the departure strip and the chart's "now" marker current between
      * dashboard pushes; both repaint in place as partial updates. */

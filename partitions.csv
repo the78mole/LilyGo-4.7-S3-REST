@@ -1,4 +1,21 @@
-# Name,     Type, SubType,   Offset,   Size,   Flags
-nvs,         data, nvs,       0x9000,   0x6000,
-phy_init,    data, phy,       0xf000,   0x1000,
-factory,     app,  factory,   0x10000,  4M,
+# A/B (ota_0 / ota_1) layout for 16 MB flash.
+#
+# The app is ~1.4 MB, so 4 MB per slot leaves room to roughly triple in size
+# before a slot has to grow -- and growing one means growing both, since the
+# bootloader picks whichever slot otadata points at.
+#
+# otadata records which slot to boot and must be exactly two 4 KB sectors:
+# the bootloader keeps two copies and picks the newer valid one, so a power
+# cut while switching slots cannot leave it unbootable.
+#
+# App partitions must start on a 64 KB boundary, which is why ota_0 begins at
+# 0x20000 rather than directly after phy_init.
+#
+# Name,     Type, SubType,  Offset,   Size,   Flags
+nvs,        data, nvs,      0x9000,   0x6000,
+otadata,    data, ota,      0xf000,   0x2000,
+phy_init,   data, phy,      0x11000,  0x1000,
+ota_0,      app,  ota_0,    0x20000,  4M,
+ota_1,      app,  ota_1,    0x420000, 4M,
+storage,    data, spiffs,   0x820000, 4M,
+# 0xC20000..0x1000000 (~3.9 MB) deliberately left unallocated for later use.

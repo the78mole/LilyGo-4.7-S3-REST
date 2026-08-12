@@ -35,7 +35,8 @@ $(SECRETS_FILE): $(ENV_FILE)
 	@echo "Generated $@ from $(ENV_FILE) (gitignored, not committed)"
 
 .PHONY: all set-target build flash monitor flash-monitor menuconfig \
-        clean fullclean size upload-assets backup-flash restore-flash
+        clean fullclean size upload-assets backup-flash restore-flash \
+        ota ota-status
 
 all: build
 
@@ -71,6 +72,20 @@ size:
 #   make upload-assets DEVICE_HOST=10.0.0.42
 upload-assets:
 	cd tools && uv run epd_client.py --host $(DEVICE_HOST) upload-demo
+
+# --- OTA (A/B) ---------------------------------------------------------
+# Builds, then pushes the image into whichever of ota_0 / ota_1 is not
+# running and reboots into it. The running slot is untouched during the
+# transfer, and the new image is only kept if it comes back up with Wi-Fi
+# and the REST API -- otherwise the next reset returns to the old one.
+#
+# Requires the A/B partition table, so a board still running the old
+# single-`factory` layout needs one final cabled `make flash` first.
+ota: build
+	cd tools && uv run epd_client.py --host $(DEVICE_HOST) ota
+
+ota-status:
+	cd tools && uv run epd_client.py --host $(DEVICE_HOST) ota-status
 
 # Dumps the entire flash (FLASH_SIZE, default 16MB) to BACKUP_DIR before
 # you overwrite anything. Do this before the first `make flash` on a
