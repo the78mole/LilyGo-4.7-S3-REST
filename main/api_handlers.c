@@ -295,8 +295,9 @@ esp_err_t api_display_image_handler(httpd_req_t *req)
      * that (or a DELETE endpoint) before using this on a long-running
      * device that receives many distinct images. */
     lv_obj_t *img = lv_img_create(lv_scr_act());
-    lv_img_set_src(img, dsc);
+    /* Position before content -- see the note in ui_card_begin(). */
     lv_obj_set_pos(img, x, y);
+    lv_img_set_src(img, dsc);
 
     lvgl_port_unlock();
 
@@ -730,9 +731,10 @@ esp_err_t api_display_text_handler(httpd_req_t *req)
      * screen behaves like a persistent canvas. Same lifecycle caveat as
      * api_display_image_handler() applies. */
     lv_obj_t *label = lv_label_create(lv_scr_act());
+    /* Position before content -- see the note in ui_card_begin(). */
+    lv_obj_set_pos(label, x, y);
     lv_obj_set_style_text_font(label, font_for_size(size), 0);
     lv_label_set_text(label, text);
-    lv_obj_set_pos(label, x, y);
 
     lvgl_port_unlock();
 

@@ -36,6 +36,12 @@ static SemaphoreHandle_t s_fb_mutex;
 static volatile bool s_dirty;
 static TaskHandle_t s_refresh_task;
 
+/* Bounding box of everything written since the last panel update. Tracked so
+ * a one-line change (the departure strip ticking over) costs a ~200ms partial
+ * update instead of a ~4s full-screen clear-and-redraw. */
+static int s_dx1, s_dy1, s_dx2, s_dy2;
+static int s_partials_since_full;
+
 #define FRAMEBUFFER_SIZE (EPD_WIDTH * EPD_HEIGHT / 2)
 #define EPD_WHITE_BYTE   0xFF
 
@@ -79,6 +85,14 @@ void display_manager_write_pixels(int x1, int y1, int x2, int y2,
             set_pixel_gray4(x, y, src_row[x - x1]);
         }
     }
+    if (!s_dirty) {
+        s_dx1 = x1; s_dy1 = y1; s_dx2 = x2; s_dy2 = y2;
+    } else {
+        if (x1 < s_dx1) s_dx1 = x1;
+        if (y1 < s_dy1) s_dy1 = y1;
+        if (x2 > s_dx2) s_dx2 = x2;
+        if (y2 > s_dy2) s_dy2 = y2;
+    }
     s_dirty = true;
     xSemaphoreGive(s_fb_mutex);
 
@@ -107,6 +121,7 @@ static void refresh_task(void *arg)
 
         xSemaphoreTake(s_fb_mutex, portMAX_DELAY);
         bool dirty = s_dirty;
+        int x1 = s_dx1, y1 = s_dy1, x2 = s_dx2, y2 = s_dy2;
         s_dirty = false;
         xSemaphoreGive(s_fb_mutex);
 
@@ -114,17 +129,56 @@ static void refresh_task(void *arg)
             continue;
         }
 
-        /* Clear-then-draw: the framebuffer always holds the complete composed
-         * screen, so a full clear before drawing costs an extra ~600ms but
-         * guarantees no ghosting from the previous frame. If update latency
-         * matters more than contrast for your use case, drop the epd_clear()
-         * and accept some ghosting (or add periodic full-clear cycles). */
-        ESP_LOGD(TAG, "refresh: start");
+        /* epdiy-style 4bpp packing puts two pixels in a byte, so a partial
+         * area must start and end on a byte boundary. */
+        x1 &= ~1;
+        x2 |= 1;
+        if (x1 < 0) x1 = 0;
+        if (y1 < 0) y1 = 0;
+        if (x2 >= EPD_WIDTH) x2 = EPD_WIDTH - 1;
+        if (y2 >= EPD_HEIGHT) y2 = EPD_HEIGHT - 1;
+
+        int aw = x2 - x1 + 1;
+        int ah = y2 - y1 + 1;
+        long area_px = (long)aw * ah;
+        long full_px = (long)EPD_WIDTH * EPD_HEIGHT;
+
+        /* Partial updates leave a little residue behind, so fall back to a
+         * full clear when the change is large anyway, and force one
+         * periodically to stop ghosting accumulating over a long run of
+         * minute-by-minute strip updates. */
+        bool go_full = (area_px * 2 > full_px) ||
+                       (s_partials_since_full >= CONFIG_APP_FULL_REFRESH_EVERY);
+
         epd_poweron();
-        epd_clear();
-        epd_draw_grayscale_image(epd_full_screen(), s_framebuffer);
+        if (go_full) {
+            epd_clear();
+            epd_draw_grayscale_image(epd_full_screen(), s_framebuffer);
+            s_partials_since_full = 0;
+            ESP_LOGI(TAG, "full refresh");
+        } else {
+            /* epd_draw_grayscale_image() wants a buffer sized to the area, so
+             * copy the rows out of the full framebuffer. */
+            size_t row_bytes = (size_t)aw / 2;
+            uint8_t *sub = heap_caps_malloc(row_bytes * ah, MALLOC_CAP_SPIRAM);
+            if (sub) {
+                for (int y = 0; y < ah; y++) {
+                    memcpy(sub + (size_t)y * row_bytes,
+                           s_framebuffer + (size_t)(y1 + y) * (EPD_WIDTH / 2) + x1 / 2,
+                           row_bytes);
+                }
+                Rect_t area = { .x = x1, .y = y1, .width = aw, .height = ah };
+                epd_draw_grayscale_image(area, sub);
+                heap_caps_free(sub);
+                s_partials_since_full++;
+                ESP_LOGI(TAG, "partial refresh %dx%d at (%d,%d)", aw, ah, x1, y1);
+            } else {
+                epd_clear();
+                epd_draw_grayscale_image(epd_full_screen(), s_framebuffer);
+                s_partials_since_full = 0;
+            }
+        }
         epd_poweroff();
-        ESP_LOGD(TAG, "refresh: done");
     }
 }
 

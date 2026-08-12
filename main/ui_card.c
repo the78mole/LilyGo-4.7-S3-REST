@@ -47,9 +47,13 @@ esp_err_t ui_card_begin(ui_card_t *card, int x, int y, int w, int h, const char 
         return ESP_ERR_NO_MEM;
     }
 
+    /* Position BEFORE giving the object any size or content. LVGL creates
+     * objects at (0,0), and lv_obj_set_pos() invalidates both the old and the
+     * new area -- so positioning last makes every single widget dirty the
+     * region from the screen origin, which defeats partial panel refresh. */
+    lv_obj_set_pos(card->canvas, x, y);
     lv_canvas_set_buffer(card->canvas, card->buf, w, h, LV_IMG_CF_TRUE_COLOR);
     lv_canvas_fill_bg(card->canvas, UI_WHITE, LV_OPA_COVER);
-    lv_obj_set_pos(card->canvas, x, y);
 
     card->w = w;
     card->h = h;

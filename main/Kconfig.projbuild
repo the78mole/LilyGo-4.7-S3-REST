@@ -210,6 +210,14 @@ menu "LilyGo T5-4.7 S3 Application"
             int "LVGL task priority"
             default 4
 
+        config APP_FULL_REFRESH_EVERY
+            int "Force a full panel refresh after this many partial updates"
+            default 30
+            help
+                Partial updates are fast but leave faint residue. With a
+                one-minute strip update that is a full clean-up every half
+                hour.
+
         config APP_LVGL_TICK_PERIOD_MS
             int "LVGL tick period (ms)"
             default 5
