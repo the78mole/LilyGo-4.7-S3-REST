@@ -360,6 +360,7 @@ esp_err_t api_display_chart_handler(httpd_req_t *req)
     bool tomorrow = cJSON_IsString(jslot) && strcmp(jslot->valuestring, "tomorrow") == 0;
     /* Highlighting "now" on tomorrow's curve would be meaningless. */
     spec.highlight_now = !tomorrow;
+    spec.slot_idx = tomorrow ? 1 : 0;
     strlcpy(title, tomorrow ? "Strompreis morgen" : "Strompreis heute", sizeof(title));
     ui_card_slot_rect(tomorrow ? "bottom-right" : "bottom-left",
                       &spec.x, &spec.y, &spec.w, &spec.h);

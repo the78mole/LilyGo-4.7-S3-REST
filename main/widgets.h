@@ -86,6 +86,15 @@ typedef struct {
  * The caller must hold the LVGL lock. */
 esp_err_t widget_list_draw(const widget_list_spec_t *spec);
 esp_err_t widget_agenda_draw(const widget_agenda_spec_t *spec);
+
+/*
+ * Redraws only the departures + Wi-Fi part of the agenda cell, in place, and
+ * invalidates just that rectangle. Called once a minute: the rest of the cell
+ * (appointments, tasks, waste) changes far more slowly, and repainting it
+ * would turn a small partial panel update into a large one.
+ * No-op until widget_agenda_draw() has run once.
+ */
+esp_err_t widget_agenda_refresh_transit(void);
 esp_err_t widget_weather_draw(const widget_weather_spec_t *spec);
 
 #ifdef __cplusplus

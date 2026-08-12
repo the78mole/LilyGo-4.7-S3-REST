@@ -13,6 +13,21 @@
 
 static const char *TAG = "chart";
 
+#define CHART_SLOTS 2
+
+/* Canvas is reused per slot: chart_redraw() runs every quarter hour, and
+ * creating a fresh canvas each time would leak both an LVGL object and its
+ * PSRAM buffer. Also stores the data so a redraw needs no client round-trip. */
+static lv_obj_t *s_canvas[CHART_SLOTS];
+static lv_color_t *s_cbuf[CHART_SLOTS];
+static int s_cw[CHART_SLOTS], s_ch[CHART_SLOTS];
+static float s_vals[CHART_SLOTS][CHART_MAX_SLOTS];
+static chart_spec_t s_spec[CHART_SLOTS];
+static char s_title[CHART_SLOTS][64];
+static char s_empty_text[CHART_SLOTS][48];
+static char s_empty_hint[CHART_SLOTS][64];
+static bool s_have[CHART_SLOTS];
+
 #define C_BLACK UI_BLACK
 #define C_DARK  UI_DARK
 #define C_MID   UI_MID
@@ -43,7 +58,7 @@ void chart_spec_defaults(chart_spec_t *spec)
     spec->h = 540 / 2 - CONFIG_APP_CHART_MARGIN - CONFIG_APP_CHART_MARGIN / 2;
 }
 
-esp_err_t chart_draw(const chart_spec_t *spec)
+static esp_err_t chart_draw_internal(const chart_spec_t *spec)
 {
     /* count == 0 is explicitly allowed and renders a "no data yet" card:
      * tomorrow's day-ahead prices do not exist before ~13:00, and an empty
@@ -57,24 +72,39 @@ esp_err_t chart_draw(const chart_spec_t *spec)
     }
 
     const int w = spec->w, h = spec->h;
-
-    /* One canvas buffer per chart, kept alive for the object's lifetime (see
-     * the lifecycle note in api_handlers.c -- nothing evicts these yet). */
-    size_t buf_bytes = (size_t)w * h * sizeof(lv_color_t);
-    lv_color_t *buf = heap_caps_malloc(buf_bytes, MALLOC_CAP_SPIRAM);
-    if (!buf) {
-        ESP_LOGE(TAG, "canvas alloc failed (%u bytes)", (unsigned)buf_bytes);
-        return ESP_ERR_NO_MEM;
+    int idx = spec->slot_idx;
+    if (idx < 0 || idx >= CHART_SLOTS) {
+        idx = 0;
     }
 
-    lv_obj_t *canvas = lv_canvas_create(lv_scr_act());
-    if (!canvas) {
-        heap_caps_free(buf);
-        return ESP_ERR_NO_MEM;
+    /* Reuse this slot's canvas when the geometry is unchanged. */
+    if (s_canvas[idx] && (s_cw[idx] != w || s_ch[idx] != h)) {
+        lv_obj_del(s_canvas[idx]);
+        heap_caps_free(s_cbuf[idx]);
+        s_canvas[idx] = NULL;
+        s_cbuf[idx] = NULL;
     }
-    lv_canvas_set_buffer(canvas, buf, w, h, LV_IMG_CF_TRUE_COLOR);
+    if (!s_canvas[idx]) {
+        size_t buf_bytes = (size_t)w * h * sizeof(lv_color_t);
+        s_cbuf[idx] = heap_caps_malloc(buf_bytes, MALLOC_CAP_SPIRAM);
+        if (!s_cbuf[idx]) {
+            ESP_LOGE(TAG, "canvas alloc failed (%u bytes)", (unsigned)buf_bytes);
+            return ESP_ERR_NO_MEM;
+        }
+        s_canvas[idx] = lv_canvas_create(lv_scr_act());
+        if (!s_canvas[idx]) {
+            heap_caps_free(s_cbuf[idx]);
+            s_cbuf[idx] = NULL;
+            return ESP_ERR_NO_MEM;
+        }
+        /* Position before content -- see the note in ui_card_begin(). */
+        lv_obj_set_pos(s_canvas[idx], spec->x, spec->y);
+        lv_canvas_set_buffer(s_canvas[idx], s_cbuf[idx], w, h, LV_IMG_CF_TRUE_COLOR);
+        s_cw[idx] = w;
+        s_ch[idx] = h;
+    }
+    lv_obj_t *canvas = s_canvas[idx];
     lv_canvas_fill_bg(canvas, C_WHITE, LV_OPA_COVER);
-    lv_obj_set_pos(canvas, spec->x, spec->y);
 
     /* Needed before the title bar is drawn: the current price is shown there. */
     int now_slot = spec->highlight_now ? time_sync_current_slot(spec->interval_min) : -1;
@@ -168,8 +198,6 @@ esp_err_t chart_draw(const chart_spec_t *spec)
     const int plot_w = plot_x1 - plot_x0;
     const int plot_h = plot_y1 - plot_y0;
     if (plot_w <= 0 || plot_h <= 0) {
-        lv_obj_del(canvas);
-        heap_caps_free(buf);
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -314,4 +342,47 @@ esp_err_t chart_draw(const chart_spec_t *spec)
              spec->title, spec->count, spec->interval_min, lo, hi, now_slot,
              now_slot >= 0 ? spec->values[now_slot] : -1.0f, avg);
     return ESP_OK;
+}
+
+
+esp_err_t chart_draw(const chart_spec_t *spec)
+{
+    if (!spec) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    int idx = spec->slot_idx;
+    if (idx < 0 || idx >= CHART_SLOTS) {
+        idx = 0;
+    }
+
+    /* Keep a private copy so chart_redraw() can re-render on the quarter hour
+     * without the client having to re-send the curve. The spec carries
+     * pointers into caller-owned buffers, so the strings are copied too. */
+    int n = spec->count > CHART_MAX_SLOTS ? CHART_MAX_SLOTS : spec->count;
+    if (n > 0 && spec->values) {
+        memcpy(s_vals[idx], spec->values, (size_t)n * sizeof(float));
+    }
+    s_spec[idx] = *spec;
+    s_spec[idx].count = n;
+    s_spec[idx].values = n > 0 ? s_vals[idx] : NULL;
+    strlcpy(s_title[idx], spec->title ? spec->title : "", sizeof(s_title[idx]));
+    s_spec[idx].title = s_title[idx];
+    strlcpy(s_empty_text[idx], spec->empty_text ? spec->empty_text : "",
+            sizeof(s_empty_text[idx]));
+    s_spec[idx].empty_text = s_empty_text[idx][0] ? s_empty_text[idx] : NULL;
+    strlcpy(s_empty_hint[idx], spec->empty_hint ? spec->empty_hint : "",
+            sizeof(s_empty_hint[idx]));
+    s_spec[idx].empty_hint = s_empty_hint[idx][0] ? s_empty_hint[idx] : NULL;
+    s_spec[idx].unit = "ct/kWh";
+    s_have[idx] = true;
+
+    return chart_draw_internal(&s_spec[idx]);
+}
+
+esp_err_t chart_redraw(int slot_idx)
+{
+    if (slot_idx < 0 || slot_idx >= CHART_SLOTS || !s_have[slot_idx]) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return chart_draw_internal(&s_spec[slot_idx]);
 }

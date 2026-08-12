@@ -129,10 +129,11 @@ static void refresh_task(void *arg)
             continue;
         }
 
-        /* epdiy-style 4bpp packing puts two pixels in a byte, so a partial
-         * area must start and end on a byte boundary. */
-        x1 &= ~1;
-        x2 |= 1;
+        /* Align to 4 pixels, not 2: epd_clear_area_cycles() indexes its mask
+         * with (area.x % 4), so a merely byte-aligned rectangle comes out
+         * shifted on the panel. */
+        x1 &= ~3;
+        x2 |= 3;
         if (x1 < 0) x1 = 0;
         if (y1 < 0) y1 = 0;
         if (x2 >= EPD_WIDTH) x2 = EPD_WIDTH - 1;
@@ -168,6 +169,11 @@ static void refresh_task(void *arg)
                            row_bytes);
                 }
                 Rect_t area = { .x = x1, .y = y1, .width = aw, .height = ah };
+                /* E-paper is persistent: drawing without clearing first
+                 * overlays the new image on the old one instead of replacing
+                 * it. The full-refresh path calls epd_clear() for the same
+                 * reason. */
+                epd_clear_area(area);
                 epd_draw_grayscale_image(area, sub);
                 heap_caps_free(sub);
                 s_partials_since_full++;

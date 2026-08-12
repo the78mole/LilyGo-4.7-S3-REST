@@ -27,6 +27,7 @@ typedef struct {
      * card says so far more clearly than an absent cell. */
     const char *empty_text;
     const char *empty_hint;
+    int slot_idx;       /* 0 = today, 1 = tomorrow; keys the canvas cache */
 } chart_spec_t;
 
 /*
@@ -54,6 +55,13 @@ void chart_spec_defaults(chart_spec_t *spec);
  * The caller must hold the LVGL lock.
  */
 esp_err_t chart_draw(const chart_spec_t *spec);
+
+/*
+ * Redraws a previously drawn chart from its stored data, without needing the
+ * client to re-send it. Used to move the "now" marker on when the quarter
+ * hour ticks over. No-op if that slot has never been drawn.
+ */
+esp_err_t chart_redraw(int slot_idx);
 
 #ifdef __cplusplus
 }

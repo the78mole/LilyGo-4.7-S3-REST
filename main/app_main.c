@@ -7,6 +7,7 @@
 #include "sd_card.h"
 #include "departures.h"
 #include "time_sync.h"
+#include "ui_tick.h"
 #include "wifi_manager.h"
 
 static const char *TAG = "app_main";
@@ -53,6 +54,13 @@ void app_main(void)
 
     ESP_LOGI(TAG, "Starting REST API...");
     ESP_ERROR_CHECK(http_server_start());
+
+    /* Keeps the departure strip and the chart's "now" marker current between
+     * dashboard pushes; both repaint in place as partial updates. */
+    if (ui_tick_start() != ESP_OK) {
+        ESP_LOGW(TAG, "ui tick task failed to start -- display will only "
+                      "update on REST pushes");
+    }
 
     ESP_LOGI(TAG, "Ready.");
 }

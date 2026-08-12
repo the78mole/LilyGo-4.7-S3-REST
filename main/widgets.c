@@ -6,9 +6,21 @@
 #include "esp_log.h"
 #include "departures.h"
 #include "wifi_manager.h"
+#include "esp_heap_caps.h"
 #include "ui_card.h"
 
 static const char *TAG = "widgets";
+
+/*
+ * The transit strip lives on its own small canvas rather than on the agenda
+ * card. lv_canvas_draw_*() invalidates the *entire* canvas it draws on, so
+ * painting the strip onto the big card forced LVGL to reflush the whole cell
+ * -- turning a one-line change into a quarter-screen panel update. A separate
+ * canvas keeps the invalidated region down to the strip itself.
+ */
+static ui_card_t s_transit;
+static lv_color_t *s_transit_buf;
+static bool s_transit_ready;
 
 /* ---------------------------------------------------------------- list --- */
 
@@ -141,6 +153,77 @@ static int draw_wifi(ui_card_t *card, int x, int y, int rssi)
     return WIFI_ICON_W;
 }
 
+/* Departures and signal strength, read straight from the device-side pollers
+ * rather than arriving over REST. Returns how many departures were drawn. */
+static int draw_transit(ui_card_t *card, int strip_y, int avail_w)
+{
+    departure_t deps[DEPARTURES_MAX];
+    int n_dep = departures_get(deps, DEPARTURES_MAX);
+    int dx = 0;
+    int shown = 0;
+
+    for (int i = 0; i < n_dep; i++) {
+        const char *badge = deps[i].dir[0] ? deps[i].dir : deps[i].line;
+        if (badge[0] == '\0') {
+            continue;
+        }
+        char txt[24];
+        if (!deps[i].valid) {
+            strlcpy(txt, "--:--", sizeof(txt));
+        } else if (deps[i].cancelled) {
+            strlcpy(txt, "AUSGEF", sizeof(txt));
+        } else {
+            snprintf(txt, sizeof(txt), "%s +%d", deps[i].time, deps[i].delay_min);
+        }
+
+        int bw = lv_txt_get_width(badge, strlen(badge), &lv_font_montserrat_14,
+                                  0, LV_TEXT_FLAG_NONE) + 12;
+        int tw = lv_txt_get_width(txt, strlen(txt), &lv_font_montserrat_14,
+                                  0, LV_TEXT_FLAG_NONE);
+        int col_w = bw > tw ? bw : tw;
+        if (dx + col_w > avail_w) {
+            break;
+        }
+        ui_card_badge(card, dx, strip_y, 20, badge);
+        ui_card_text(card, dx, strip_y + 22, col_w + 8, txt, UI_BLACK,
+                     &lv_font_montserrat_14);
+        dx += col_w + 12;
+        shown++;
+    }
+
+    int rssi = wifi_manager_rssi();
+    char rssi_txt[16];
+    if (rssi == 0) {
+        strlcpy(rssi_txt, "--", sizeof(rssi_txt));
+    } else {
+        snprintf(rssi_txt, sizeof(rssi_txt), "%d", rssi);
+    }
+    int rssi_w = lv_txt_get_width(rssi_txt, strlen(rssi_txt), &lv_font_montserrat_14,
+                                  0, LV_TEXT_FLAG_NONE);
+    int icon_w = WIFI_ICON_W > rssi_w ? WIFI_ICON_W : rssi_w;
+    int free_to = avail_w;
+    if (free_to - dx >= icon_w) {
+        int ix = dx + (free_to - dx - icon_w) / 2;
+        draw_wifi(card, ix + (icon_w - WIFI_ICON_W) / 2, strip_y, rssi);
+        ui_card_text(card, ix, strip_y + 22, icon_w + 8, rssi_txt, UI_MID,
+                     &lv_font_montserrat_14);
+    }
+    ESP_LOGI(TAG, "transit: %d departures, rssi=%d dBm", shown, rssi);
+    return shown;
+}
+
+esp_err_t widget_agenda_refresh_transit(void)
+{
+    if (!s_transit_ready || !s_transit.canvas) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    /* Wipe and repaint the strip canvas. Its own invalidation is all LVGL
+     * needs, and it covers only this small rectangle. */
+    lv_canvas_fill_bg(s_transit.canvas, UI_WHITE, LV_OPA_COVER);
+    draw_transit(&s_transit, 0, s_transit.cw);
+    return ESP_OK;
+}
+
 esp_err_t widget_agenda_draw(const widget_agenda_spec_t *spec)
 {
     if (!spec) {
@@ -224,73 +307,46 @@ esp_err_t widget_agenda_draw(const widget_agenda_spec_t *spec)
         waste_left = bx;
     }
 
-    /* Departures are read straight from the device-side poller rather than
-     * arriving over REST, so they stay current between dashboard pushes.
-     * Stacked like the waste badges -- label above, time below -- but with
-     * both left edges aligned so the columns read as a row of entries. */
-    departure_t deps[DEPARTURES_MAX];
-    int n_dep = departures_get(deps, DEPARTURES_MAX);
-    int dx = 0;
+    /* Transit strip on its own canvas, positioned inside the cell. */
+    const int tw = waste_left - 12;
+    const int th = card.ch - strip_y;
     int shown = 0;
-    for (int i = 0; i < n_dep; i++) {
-        const char *badge = deps[i].dir[0] ? deps[i].dir : deps[i].line;
-        if (badge[0] == '\0') {
-            continue;
+    if (tw > 40 && th > 20) {
+        if (s_transit.canvas && (s_transit.w != tw || s_transit.h != th)) {
+            lv_obj_del(s_transit.canvas);
+            heap_caps_free(s_transit_buf);
+            s_transit.canvas = NULL;
+            s_transit_buf = NULL;
         }
-
-        char txt[24];
-        if (!deps[i].valid) {
-            /* Never present a stale time as if it were current. */
-            strlcpy(txt, "--:--", sizeof(txt));
-        } else if (deps[i].cancelled) {
-            /* Replaces the time entirely: a scheduled time for a trip that
-             * will not run is worse than no time at all. */
-            strlcpy(txt, "AUSGEF", sizeof(txt));
-        } else {
-            snprintf(txt, sizeof(txt), "%s +%d", deps[i].time, deps[i].delay_min);
+        if (!s_transit.canvas) {
+            s_transit_buf = heap_caps_malloc((size_t)tw * th * sizeof(lv_color_t),
+                                             MALLOC_CAP_SPIRAM);
+            if (s_transit_buf) {
+                s_transit.canvas = lv_canvas_create(lv_scr_act());
+                if (s_transit.canvas) {
+                    lv_obj_set_pos(s_transit.canvas,
+                                   spec->x + card.cx0,
+                                   spec->y + card.cy0 + strip_y);
+                    lv_canvas_set_buffer(s_transit.canvas, s_transit_buf, tw, th,
+                                         LV_IMG_CF_TRUE_COLOR);
+                    s_transit.w = tw;
+                    s_transit.h = th;
+                    s_transit.cx0 = 0;
+                    s_transit.cy0 = 0;
+                    s_transit.cw = tw;
+                    s_transit.ch = th;
+                }
+            }
         }
-
-        int bw = lv_txt_get_width(badge, strlen(badge), &lv_font_montserrat_14,
-                                  0, LV_TEXT_FLAG_NONE) + 12;
-        int tw = lv_txt_get_width(txt, strlen(txt), &lv_font_montserrat_14,
-                                  0, LV_TEXT_FLAG_NONE);
-        int col_w = bw > tw ? bw : tw;
-        if (dx + col_w > waste_left - 12) {
-            break; /* would run into the waste badges */
+        if (s_transit.canvas) {
+            lv_canvas_fill_bg(s_transit.canvas, UI_WHITE, LV_OPA_COVER);
+            shown = draw_transit(&s_transit, 0, tw);
+            s_transit_ready = true;
         }
-
-        ui_card_badge(&card, dx, strip_y, 20, badge);
-        ui_card_text(&card, dx, strip_y + 22, col_w + 8, txt, UI_BLACK,
-                     &lv_font_montserrat_14);
-        dx += col_w + 12;
-        shown++;
-    }
-
-    /* Signal strength sits in the gap between departures and waste badges.
-     * Only drawn if it genuinely fits -- crowding it in would overlap one of
-     * its neighbours, and the neighbours carry more information. */
-    int rssi = wifi_manager_rssi();
-    char rssi_txt[16];
-    if (rssi == 0) {
-        strlcpy(rssi_txt, "--", sizeof(rssi_txt));
-    } else {
-        snprintf(rssi_txt, sizeof(rssi_txt), "%d", rssi);
-    }
-    int rssi_w = lv_txt_get_width(rssi_txt, strlen(rssi_txt), &lv_font_montserrat_14,
-                                  0, LV_TEXT_FLAG_NONE);
-    int icon_w = WIFI_ICON_W > rssi_w ? WIFI_ICON_W : rssi_w;
-    int free_from = dx;
-    int free_to = waste_left - 10;
-    if (free_to - free_from >= icon_w) {
-        int ix = free_from + (free_to - free_from - icon_w) / 2;
-        draw_wifi(&card, ix + (icon_w - WIFI_ICON_W) / 2, strip_y, rssi);
-        ui_card_text(&card, ix, strip_y + 22, icon_w + 8, rssi_txt, UI_MID,
-                     &lv_font_montserrat_14);
     }
 
     ESP_LOGI(TAG, "agenda '%s': %d events, %d todos, %d waste, %d departures",
              spec->title, n_ev, n_td, n_w, shown);
-    ESP_LOGI(TAG, "agenda: wifi rssi=%d dBm", rssi);
     return ESP_OK;
 }
 

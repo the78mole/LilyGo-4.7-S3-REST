@@ -12,6 +12,7 @@ idf_component_register(
         "widgets.c"
         "time_sync.c"
         "departures.c"
+        "ui_tick.c"
     INCLUDE_DIRS "."
     REQUIRES
         esp_wifi

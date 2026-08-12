@@ -78,6 +78,37 @@ LilyGo-Screen-4.7-S3/
   and the render task from touching the SD card or the LVGL object tree
   concurrently.
 
+## Self-updating parts of the screen
+
+Two things go stale on their own and are refreshed by the device, without a
+client push (`ui_tick.c`):
+
+- **every minute** — the departure strip and Wi-Fi signal
+- **every quarter hour** — today's price chart, to move the "now" marker onto
+  the current slot
+
+Boundaries are detected by watching the wall clock rather than counting
+elapsed time, so the quarter-hour redraw lands on :00/:15/:30/:45 instead of
+drifting.
+
+Both repaint in place and cost a *partial* panel update: `display_manager`
+tracks the bounding box of what changed and pushes only that region
+(`epd_clear_area` + `epd_draw_grayscale_image`) instead of a ~4s full-screen
+clear-and-redraw. A full refresh is still forced when the change covers more
+than half the screen, and every `CONFIG_APP_FULL_REFRESH_EVERY` partial
+updates, since partial updates leave faint residue.
+
+Three things that had to be right for this to work, each found by measuring:
+
+- **Rectangles must be 4-pixel aligned.** `epd_clear_area_cycles()` indexes its
+  mask with `area.x % 4`; a merely byte-aligned rectangle renders shifted.
+- **The area must be cleared before drawing.** E-paper is persistent, so
+  drawing alone overlays new content on old rather than replacing it.
+- **The transit strip has its own canvas.** `lv_canvas_draw_*()` invalidates
+  the *entire* canvas it draws on, so painting the strip onto the agenda card
+  made LVGL reflush the whole cell — a quarter-screen update for one changed
+  line. On its own canvas the update is 332x50 instead of 476x265.
+
 ## REST API
 
 | Method | Path                  | Body |
