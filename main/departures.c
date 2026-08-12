@@ -33,9 +33,17 @@ static const char *TAG = "departures";
     "&outputFormat=JSON&useRealtime=1&limit=%d"
 
 #define EFA_LIMIT 20
-/* The full monitor response is ~24 kB; cap generously but finitely so a
- * misbehaving endpoint cannot exhaust PSRAM. */
-#define RESPONSE_MAX_BYTES (64 * 1024)
+/*
+ * Measured monitor responses: ~47 kB for stop 3003410, ~62 kB for 3003463 --
+ * the latter sat just under the previous 64 kB cap and tipped over it whenever
+ * the response grew a little, silently dropping that line to "--:--".
+ *
+ * The buffer lives in PSRAM (see heap_caps_realloc below), where 256 kB is
+ * nothing against the ~8 MB available, so this is sized for headroom rather
+ * than thrift. It stays finite only so a misbehaving endpoint cannot grow it
+ * without bound.
+ */
+#define RESPONSE_MAX_BYTES (256 * 1024)
 
 typedef struct {
     const char *stop_id;
@@ -126,6 +134,9 @@ static char *fetch_json(const char *stop_id)
         free(ctx.buf);
         return NULL;
     }
+    /* Logged so a response creeping towards RESPONSE_MAX_BYTES is visible
+     * before it starts getting discarded. */
+    ESP_LOGD(TAG, "stop %s: %u bytes", stop_id, (unsigned)ctx.len);
     return ctx.buf;
 }
 
