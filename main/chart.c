@@ -69,6 +69,12 @@ esp_err_t chart_draw(const chart_spec_t *spec)
     lv_canvas_fill_bg(canvas, C_WHITE, LV_OPA_COVER);
     lv_obj_set_pos(canvas, spec->x, spec->y);
 
+    /* Needed before the title bar is drawn: the current price is shown there. */
+    int now_slot = spec->highlight_now ? time_sync_current_slot(spec->interval_min) : -1;
+    if (now_slot >= spec->count) {
+        now_slot = -1;
+    }
+
     lv_draw_rect_dsc_t rect;
     lv_draw_rect_dsc_init(&rect);
     rect.bg_opa = LV_OPA_COVER;
@@ -89,9 +95,18 @@ esp_err_t chart_draw(const chart_spec_t *spec)
     rect.bg_color = C_BLACK;
     lv_canvas_draw_rect(canvas, 2, 2, w - 4, TITLE_H, &rect);
 
-    label.color = C_WHITE;
-    lv_canvas_draw_text(canvas, 10, 5, w - 20, &label, spec->title);
-    label.color = C_BLACK;
+    ui_text_ex(canvas, 10, 5, w - 20, spec->title, C_WHITE,
+               &lv_font_montserrat_14, LV_TEXT_ALIGN_LEFT, true);
+
+    /* Current price, right-aligned inside the title bar. Deliberately not
+     * placed inside the plot area: the evening peak reaches the top-right
+     * corner there and would sit underneath it. */
+    if (now_slot >= 0) {
+        char nowbuf[32];
+        snprintf(nowbuf, sizeof(nowbuf), "jetzt %.1f ct", spec->values[now_slot]);
+        ui_text_ex(canvas, w / 2, 4, w / 2 - 12, nowbuf, C_WHITE,
+                   &lv_font_montserrat_18, LV_TEXT_ALIGN_RIGHT, true);
+    }
 
     /* --- statistics --- */
     float mn = spec->values[0], mx = spec->values[0], sum = 0.0f;
@@ -143,7 +158,6 @@ esp_err_t chart_draw(const chart_spec_t *spec)
     }
 
     /* --- bars --- */
-    int now_slot = spec->highlight_now ? time_sync_current_slot(spec->interval_min) : -1;
 
     float slot_w = (float)plot_w / spec->count;
     int bar_w = (int)(slot_w * 0.8f);
@@ -212,7 +226,8 @@ esp_err_t chart_draw(const chart_spec_t *spec)
         lv_canvas_draw_text(canvas, plot_x1 - 78, plot_y1 + 4, 78, &label, nowbuf);
     }
 
-    ESP_LOGI(TAG, "chart '%s': %d slots @%dmin, scale %.0f..%.0f, now_slot=%d, avg=%.1f",
-             spec->title, spec->count, spec->interval_min, lo, hi, now_slot, avg);
+    ESP_LOGI(TAG, "chart '%s': %d slots @%dmin, scale %.0f..%.0f, now_slot=%d, now=%.1f, avg=%.1f",
+             spec->title, spec->count, spec->interval_min, lo, hi, now_slot,
+             now_slot >= 0 ? spec->values[now_slot] : -1.0f, avg);
     return ESP_OK;
 }

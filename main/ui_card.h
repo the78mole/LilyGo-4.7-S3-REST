@@ -51,6 +51,19 @@ void ui_card_slot_rect(const char *slot, int *x, int *y, int *w, int *h);
  */
 esp_err_t ui_card_begin(ui_card_t *card, int x, int y, int w, int h, const char *title);
 
+/*
+ * Text with optional faux-bold and alignment, in *canvas* coordinates.
+ *
+ * LVGL ships Montserrat in regular weight only, so "bold" is emulated by
+ * drawing the label several times with sub-pixel offsets. That matters most
+ * for the inverted title bars: on e-paper, thin white glyphs on full black
+ * partially fill in and turn mushy, and thickening the strokes is what makes
+ * them legible again.
+ */
+void ui_text_ex(lv_obj_t *canvas, int x, int y, int max_w, const char *txt,
+                lv_color_t color, const lv_font_t *font,
+                lv_text_align_t align, bool bold);
+
 /* Convenience wrappers operating in *content* coordinates. */
 void ui_card_rect(ui_card_t *card, int x, int y, int w, int h, lv_color_t color);
 void ui_card_text(ui_card_t *card, int x, int y, int max_w, const char *txt,

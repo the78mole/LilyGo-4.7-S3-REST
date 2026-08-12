@@ -154,11 +154,24 @@ def cmd_dashboard(client: EpdClient, args: argparse.Namespace) -> None:
 
 
 def cmd_chart(client: EpdClient, args: argparse.Namespace) -> None:
-    from dashboard import PRICES_TODAY, PRICES_TOMORROW
+    """Live Tibber data by default -- --demo was the old behaviour and made it
+    far too easy to 'verify' the display against placeholder numbers."""
+    if args.demo:
+        from dashboard import PRICES_TODAY, PRICES_TOMORROW
+        values = PRICES_TOMORROW if args.slot == "tomorrow" else PRICES_TODAY
+        source = "Demo"
+    else:
+        from hass import Hass
+        by_day = Hass().tibber_prices(days=2)
+        days = sorted(by_day)
+        idx = 1 if args.slot == "tomorrow" else 0
+        if idx >= len(days):
+            raise EpdClientError(f"no Tibber data for '{args.slot}' yet")
+        values = by_day[days[idx]]
+        source = f"Tibber {days[idx]}"
 
-    values = PRICES_TOMORROW if args.slot == "tomorrow" else PRICES_TODAY
     client.display_chart(values, slot=args.slot)
-    print(f"Pushed {len(values)} slots for '{args.slot}' "
+    print(f"Pushed {len(values)} slots for '{args.slot}' from {source} "
           f"(axis + now-marker decided on-device)")
 
 
@@ -267,6 +280,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_chart = sub.add_parser("chart", help="Push a price curve; device draws it with LVGL")
     p_chart.add_argument("--slot", choices=("today", "tomorrow"), default="today")
+    p_chart.add_argument("--demo", action="store_true",
+                         help="Use placeholder data instead of live Tibber prices")
     p_chart.set_defaults(func=cmd_chart)
 
     p_live = sub.add_parser("dashboard-live",

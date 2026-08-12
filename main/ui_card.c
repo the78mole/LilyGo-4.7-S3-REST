@@ -67,17 +67,37 @@ esp_err_t ui_card_begin(ui_card_t *card, int x, int y, int w, int h, const char 
     rect.bg_color = UI_BLACK;
     lv_canvas_draw_rect(card->canvas, 2, 2, w - 4, UI_TITLE_H, &rect);
 
-    lv_draw_label_dsc_t label;
-    lv_draw_label_dsc_init(&label);
-    label.font = &lv_font_montserrat_14;
-    label.color = UI_WHITE;
-    lv_canvas_draw_text(card->canvas, 10, 5, w - 20, &label, title ? title : "");
+    ui_text_ex(card->canvas, 10, 5, w - 20, title ? title : "",
+               UI_WHITE, &lv_font_montserrat_14, LV_TEXT_ALIGN_LEFT, true);
 
     card->cx0 = 10;
     card->cy0 = UI_TITLE_H + 6;
     card->cw = w - 20;
     card->ch = h - card->cy0 - 8;
     return ESP_OK;
+}
+
+void ui_text_ex(lv_obj_t *canvas, int x, int y, int max_w, const char *txt,
+                lv_color_t color, const lv_font_t *font,
+                lv_text_align_t align, bool bold)
+{
+    if (!canvas || !txt) {
+        return;
+    }
+    lv_draw_label_dsc_t label;
+    lv_draw_label_dsc_init(&label);
+    label.font = font ? font : &lv_font_montserrat_14;
+    label.color = color;
+    label.align = align;
+
+    lv_canvas_draw_text(canvas, x, y, max_w, &label, txt);
+    if (bold) {
+        /* One horizontal and one vertical repeat. Horizontal alone leaves the
+         * horizontal strokes thin, which is exactly where white-on-black loses
+         * definition on this panel. */
+        lv_canvas_draw_text(canvas, x + 1, y, max_w, &label, txt);
+        lv_canvas_draw_text(canvas, x, y + 1, max_w, &label, txt);
+    }
 }
 
 void ui_card_rect(ui_card_t *card, int x, int y, int w, int h, lv_color_t color)
