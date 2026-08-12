@@ -481,6 +481,97 @@ esp_err_t api_display_list_handler(httpd_req_t *req)
     return send_ok(req);
 }
 
+/* Copies a JSON string field into a fixed buffer, tolerating absence. */
+static void json_str(cJSON *obj, const char *key, char *dst, size_t dst_sz)
+{
+    cJSON *j = cJSON_GetObjectItemCaseSensitive(obj, key);
+    strlcpy(dst, cJSON_IsString(j) ? j->valuestring : "", dst_sz);
+}
+
+esp_err_t api_display_agenda_handler(httpd_req_t *req)
+{
+    char *body;
+    if (read_json_body(req, &body) != ESP_OK) {
+        return send_err(req, HTTPD_400_BAD_REQUEST, "missing/oversized JSON body");
+    }
+    cJSON *root = cJSON_Parse(body);
+    free(body);
+    if (!root) {
+        return send_err(req, HTTPD_400_BAD_REQUEST, "invalid JSON");
+    }
+
+    widget_agenda_spec_t spec = {0};
+    static widget_event_t events[WIDGET_AGENDA_MAX_EVENTS];
+    static widget_todo_t todos[WIDGET_AGENDA_MAX_TODOS];
+    static widget_waste_t waste[WIDGET_AGENDA_MAX_WASTE];
+    memset(events, 0, sizeof(events));
+    memset(todos, 0, sizeof(todos));
+    memset(waste, 0, sizeof(waste));
+
+    cJSON *arr = cJSON_GetObjectItemCaseSensitive(root, "events");
+    if (cJSON_IsArray(arr)) {
+        int n = cJSON_GetArraySize(arr);
+        if (n > WIDGET_AGENDA_MAX_EVENTS) n = WIDGET_AGENDA_MAX_EVENTS;
+        for (int i = 0; i < n; i++) {
+            cJSON *e = cJSON_GetArrayItem(arr, i);
+            json_str(e, "when", events[i].when, sizeof(events[i].when));
+            json_str(e, "text", events[i].text, sizeof(events[i].text));
+            json_str(e, "src",  events[i].src,  sizeof(events[i].src));
+        }
+        spec.events = events;
+        spec.event_count = n;
+    }
+
+    arr = cJSON_GetObjectItemCaseSensitive(root, "todos");
+    if (cJSON_IsArray(arr)) {
+        int n = cJSON_GetArraySize(arr);
+        if (n > WIDGET_AGENDA_MAX_TODOS) n = WIDGET_AGENDA_MAX_TODOS;
+        for (int i = 0; i < n; i++) {
+            cJSON *e = cJSON_GetArrayItem(arr, i);
+            json_str(e, "text", todos[i].text, sizeof(todos[i].text));
+            json_str(e, "src",  todos[i].src,  sizeof(todos[i].src));
+        }
+        spec.todos = todos;
+        spec.todo_count = n;
+    }
+
+    arr = cJSON_GetObjectItemCaseSensitive(root, "waste");
+    if (cJSON_IsArray(arr)) {
+        int n = cJSON_GetArraySize(arr);
+        if (n > WIDGET_AGENDA_MAX_WASTE) n = WIDGET_AGENDA_MAX_WASTE;
+        for (int i = 0; i < n; i++) {
+            cJSON *e = cJSON_GetArrayItem(arr, i);
+            json_str(e, "letter", waste[i].letter, sizeof(waste[i].letter));
+            json_str(e, "label",  waste[i].label,  sizeof(waste[i].label));
+        }
+        spec.waste = waste;
+        spec.waste_count = n;
+    }
+
+    char title[64] = "Termine & Aufgaben";
+    cJSON *jtitle = cJSON_GetObjectItemCaseSensitive(root, "title");
+    if (cJSON_IsString(jtitle)) {
+        strlcpy(title, jtitle->valuestring, sizeof(title));
+    }
+    spec.title = title;
+
+    cJSON *jslot = cJSON_GetObjectItemCaseSensitive(root, "slot");
+    ui_card_slot_rect(cJSON_IsString(jslot) ? jslot->valuestring : "top-left",
+                      &spec.x, &spec.y, &spec.w, &spec.h);
+    cJSON_Delete(root);
+
+    if (!lvgl_port_lock(LVGL_LOCK_TIMEOUT_MS)) {
+        return send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "display busy");
+    }
+    esp_err_t derr = widget_agenda_draw(&spec);
+    lvgl_port_unlock();
+
+    if (derr != ESP_OK) {
+        return send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "agenda draw failed");
+    }
+    return send_ok(req);
+}
+
 esp_err_t api_display_weather_handler(httpd_req_t *req)
 {
     char *body;

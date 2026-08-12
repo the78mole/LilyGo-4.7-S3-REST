@@ -65,6 +65,9 @@ class EpdClient:
     def display_text(self, text: str, x: int, y: int, size: int = 18) -> None:
         self._post("/api/display/text", json={"text": text, "x": x, "y": y, "size": size})
 
+    def display_agenda(self, payload: dict) -> None:
+        self._post("/api/display/agenda", json=payload)
+
     def display_list(self, items, slot: str = "top-left", title: str = "Aufgaben") -> None:
         self._post("/api/display/list",
                    json={"items": items, "slot": slot, "title": title})
@@ -195,8 +198,15 @@ DEMO_TASKS = [
 
 def cmd_dashboard_live(client: EpdClient, args: argparse.Namespace) -> None:
     """All four cells rendered on-device, fed from Home Assistant."""
-    client.display_list(DEMO_TASKS, slot="top-left", title="Heute zu erledigen")
-    print(f"top-left : {len(DEMO_TASKS)} Aufgaben (Beispieldaten)")
+    if not args.demo:
+        from hass import Hass as _H, build_agenda_payload
+        agenda = build_agenda_payload(_H(), slot="top-left")
+        client.display_agenda(agenda)
+        print(f"top-left : {len(agenda['events'])} Termine, "
+              f"{len(agenda['todos'])} Aufgaben, {len(agenda['waste'])} Abfuhrtermine")
+    else:
+        client.display_list(DEMO_TASKS, slot="top-left", title="Heute zu erledigen")
+        print(f"top-left : {len(DEMO_TASKS)} Aufgaben (Beispieldaten)")
 
     if args.demo:
         from dashboard import PRICES_TODAY, PRICES_TOMORROW

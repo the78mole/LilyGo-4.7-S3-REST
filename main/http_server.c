@@ -55,6 +55,11 @@ esp_err_t http_server_start(void)
             .handler = api_display_list_handler,
         },
         {
+            .uri = "/api/display/agenda",
+            .method = HTTP_POST,
+            .handler = api_display_agenda_handler,
+        },
+        {
             .uri = "/api/display/weather",
             .method = HTTP_POST,
             .handler = api_display_weather_handler,

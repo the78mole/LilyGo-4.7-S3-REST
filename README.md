@@ -88,6 +88,7 @@ LilyGo-Screen-4.7-S3/
 | POST   | `/api/display/text`   | `{"text": "...", "x": int, "y": int, "size": int}` |
 | POST   | `/api/display/chart`  | `{"values": [<1..96 numbers>]}` — see below |
 | POST   | `/api/display/list`   | `{"items": [{"text": str, "done": bool}, ...]}` |
+| POST   | `/api/display/agenda` | `{"events": [...], "todos": [...], "waste": [...]}` |
 | POST   | `/api/display/weather`| `{"condition": <HA slug>, "temp": num, ...}` |
 
 **Raw image format** (`/sdcard/*.bin`, produced by `tools/epd_client.py convert`):
@@ -122,6 +123,18 @@ HOMEASSISTANT_TOKEN=<long-lived access token>
 - `tibber.get_prices` → quarter-hourly prices. Tibber reports **EUR/kWh**, so
   `hass.py` scales by 100 to the chart's ct/kWh axis rather than doing it on
   the device.
+- **Calendars** (`GET /api/calendars/<entity>`): appointments from
+  `calendar.daniel`, `calendar.elektro_glaser`, `calendar.glasers` and
+  `calendar.geburtstage_2`, taken from *now* over the next 48h, merged across
+  all four, sorted by start time, first 6 shown with an origin abbreviation.
+  All-day entries (`start.date`) and timed ones (`start.dateTime`) are both
+  normalised for sorting.
+- **Tasks** (`todo.get_items`, `status: needs_action`): open items from six
+  todo lists, max 6 shown, likewise tagged with their origin.
+- **Waste collection** (`calendar.birkenweg_...`): the next four pickups as
+  lettered badges in the bottom-right corner — **R**estmüll, **G**elber Sack,
+  **B**iomüll, **P**apier — each with its weekday and date.
+
 - `weather.get_forecasts` (`hourly`, also accepts `daily` / `twice_daily`) plus
   the entity state, condensed into current conditions, today's min/max, 24h
   precipitation, four look-ahead slots, and two 24h hourly series driving the

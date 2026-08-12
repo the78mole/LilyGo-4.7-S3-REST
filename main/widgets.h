@@ -24,6 +24,39 @@ typedef struct {
     int count;
 } widget_list_spec_t;
 
+#define WIDGET_AGENDA_MAX_EVENTS 6
+#define WIDGET_AGENDA_MAX_TODOS  6
+#define WIDGET_AGENDA_MAX_WASTE  4
+
+typedef struct {
+    char when[16];               /* "Do 16:30", or "Do" for all-day entries */
+    char text[WIDGET_TEXT_MAX];
+    char src[8];                 /* origin abbreviation, e.g. "Da", "EG" */
+} widget_event_t;
+
+typedef struct {
+    char text[WIDGET_TEXT_MAX];
+    char src[8];
+} widget_todo_t;
+
+typedef struct {
+    char letter[4];              /* R = Restmuell, G = Gelber Sack, B = Bio, P = Papier */
+    char label[8];               /* e.g. "Fr 14." */
+} widget_waste_t;
+
+/* Two-column cell: appointments on the left, open tasks on the right, with
+ * the waste-collection badges tucked into the bottom-right corner. */
+typedef struct {
+    const char *title;
+    int x, y, w, h;
+    const widget_event_t *events;
+    int event_count;
+    const widget_todo_t *todos;
+    int todo_count;
+    const widget_waste_t *waste;
+    int waste_count;
+} widget_agenda_spec_t;
+
 typedef struct {
     char label[8];   /* e.g. "21h" */
     float temp;
@@ -52,6 +85,7 @@ typedef struct {
 /* Both render one dashboard cell onto lv_scr_act().
  * The caller must hold the LVGL lock. */
 esp_err_t widget_list_draw(const widget_list_spec_t *spec);
+esp_err_t widget_agenda_draw(const widget_agenda_spec_t *spec);
 esp_err_t widget_weather_draw(const widget_weather_spec_t *spec);
 
 #ifdef __cplusplus

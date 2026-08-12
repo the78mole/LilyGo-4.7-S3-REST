@@ -178,3 +178,140 @@ def build_weather_payload(hass: Hass, entity_id: str, slot: str = "top-right") -
     if fc:
         payload["forecast"] = fc
     return payload
+
+
+# --------------------------------------------------------------- agenda ---
+
+# Origin abbreviations shown in front of every entry. Kept explicit rather
+# than derived, because auto-abbreviating entity ids produces collisions
+# (calendar.elektro_glaser and todo.elektro_glaser both want "El").
+SRC_ABBREV = {
+    "calendar.daniel": "Da",
+    "calendar.elektro_glaser": "EG",
+    "calendar.glasers": "Gl",
+    "calendar.geburtstage_2": "GB",
+    "todo.bizzmark": "Bz",
+    "todo.elektro_glaser": "EG",
+    "todo.ewerh": "Ew",
+    "todo.liste_von_dgbeeco": "dg",
+    "todo.meine_aufgaben": "MA",
+    "todo.alte_erinnerungen_von_google_notizen": "AE",
+}
+
+AGENDA_CALENDARS = [
+    "calendar.daniel",
+    "calendar.elektro_glaser",
+    "calendar.glasers",
+    "calendar.geburtstage_2",
+]
+
+AGENDA_TODO_LISTS = [
+    "todo.bizzmark",
+    "todo.elektro_glaser",
+    "todo.ewerh",
+    "todo.liste_von_dgbeeco",
+    "todo.meine_aufgaben",
+    "todo.alte_erinnerungen_von_google_notizen",
+]
+
+WASTE_CALENDAR = "calendar.birkenweg_erlangen_bruck_mein_abfallkalender"
+
+# Summary text -> single letter. Matched case-insensitively on a substring,
+# since the calendar's summaries carry trailing whitespace.
+WASTE_LETTERS = [
+    ("restm", "R"),
+    ("gelber", "G"),
+    ("bio", "B"),
+    ("papier", "P"),
+]
+
+_WEEKDAYS = ("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")
+
+
+def _abbrev(entity_id: str) -> str:
+    if entity_id in SRC_ABBREV:
+        return SRC_ABBREV[entity_id]
+    name = entity_id.split(".", 1)[-1]
+    return (name[:2].capitalize()) if name else "?"
+
+
+def calendar_events(hass: Hass, entity_id: str, start, end) -> list[dict]:
+    resp = hass.session.get(
+        f"{hass.url}/api/calendars/{entity_id}",
+        params={"start": start.isoformat(), "end": end.isoformat()},
+        timeout=DEFAULT_TIMEOUT,
+    )
+    if not resp.ok:
+        raise HassError(f"calendar {entity_id} -> HTTP {resp.status_code}")
+    return resp.json()
+
+
+def _event_start(ev: dict):
+    """Returns (datetime, all_day). All-day entries carry 'date', timed ones
+    'dateTime'; both are normalised to an aware datetime for sorting."""
+    s = ev.get("start", {})
+    if "dateTime" in s:
+        return _dt.datetime.fromisoformat(s["dateTime"]), False
+    d = _dt.date.fromisoformat(s["date"])
+    return _dt.datetime.combine(d, _dt.time.min).astimezone(), True
+
+
+def build_agenda_payload(hass: Hass, slot: str = "top-left", hours: int = 48) -> dict:
+    now = _dt.datetime.now().astimezone()
+    end = now + _dt.timedelta(hours=hours)
+
+    # --- appointments, merged across calendars and sorted by start ---
+    merged = []
+    for cal in AGENDA_CALENDARS:
+        try:
+            for ev in calendar_events(hass, cal, now, end):
+                ts, all_day = _event_start(ev)
+                merged.append((ts, all_day, cal, ev))
+        except HassError:
+            # One unreachable calendar must not blank the whole cell.
+            continue
+    merged.sort(key=lambda t: t[0])
+
+    events = []
+    for ts, all_day, cal, ev in merged[:6]:
+        day = _WEEKDAYS[ts.weekday()]
+        when = day if all_day else f"{day} {ts:%H:%M}"
+        events.append({
+            "when": when,
+            "text": (ev.get("summary") or "").strip(),
+            "src": _abbrev(cal),
+        })
+
+    # --- open tasks ---
+    todos = []
+    for lst in AGENDA_TODO_LISTS:
+        try:
+            resp = hass.call_service("todo", "get_items",
+                                     {"entity_id": lst, "status": "needs_action"})
+        except HassError:
+            continue
+        for item in resp.get(lst, {}).get("items", []):
+            todos.append({"text": (item.get("summary") or "").strip(),
+                          "src": _abbrev(lst)})
+    todos = todos[:6]
+
+    # --- waste collection ---
+    waste = []
+    try:
+        upcoming = calendar_events(hass, WASTE_CALENDAR, now,
+                                   now + _dt.timedelta(days=28))
+    except HassError:
+        upcoming = []
+    for ev in sorted(upcoming, key=lambda e: _event_start(e)[0])[:8]:
+        summary = (ev.get("summary") or "").strip().lower()
+        letter = next((l for key, l in WASTE_LETTERS if key in summary), None)
+        if letter is None:
+            continue
+        ts, _ = _event_start(ev)
+        waste.append({"letter": letter,
+                      "label": f"{_WEEKDAYS[ts.weekday()]} {ts.day}."})
+        if len(waste) >= 4:
+            break
+
+    return {"slot": slot, "title": "Termine & Aufgaben",
+            "events": events, "todos": todos, "waste": waste}

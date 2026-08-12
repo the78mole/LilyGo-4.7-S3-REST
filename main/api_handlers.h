@@ -34,6 +34,13 @@ esp_err_t api_display_chart_handler(httpd_req_t *req);
  * Body: {"items": [{"text": str, "done": bool}, ...], "slot": "...", "title": str} */
 esp_err_t api_display_list_handler(httpd_req_t *req);
 
+/* POST /api/display/agenda
+ * Body: {"events":[{"when","text","src"}], "todos":[{"text","src"}],
+ *        "waste":[{"letter","label"}], "slot", "title"}
+ * Two-column cell: appointments left, open tasks right, waste badges in the
+ * bottom-right corner. Merging/sorting/limiting happens client-side. */
+esp_err_t api_display_agenda_handler(httpd_req_t *req);
+
 /* POST /api/display/weather
  * Body: {"condition": <HA slug>, "temp": num, "temp_min"/"temp_max": num,
  *        "precip": num, "wind": num, "forecast": [{"label": str, "temp": num}],

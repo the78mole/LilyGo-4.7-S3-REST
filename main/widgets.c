@@ -77,6 +77,119 @@ esp_err_t widget_list_draw(const widget_list_spec_t *spec)
     return ESP_OK;
 }
 
+/* -------------------------------------------------------------- agenda --- */
+
+/* Truncates with an ellipsis to fit max_w. lv_canvas_draw_text() would wrap
+ * instead of clipping, which on a fixed-height row silently overdraws the
+ * next line. */
+static void fit_text(char *dst, size_t dst_sz, const char *src,
+                     const lv_font_t *font, int max_w)
+{
+    strlcpy(dst, src, dst_sz);
+    if (lv_txt_get_width(dst, strlen(dst), font, 0, LV_TEXT_FLAG_NONE) <= max_w) {
+        return;
+    }
+    size_t len = strlen(dst);
+    while (len > 1) {
+        /* Step back over UTF-8 continuation bytes so a cut never lands inside
+         * a multi-byte character. */
+        do {
+            len--;
+        } while (len > 0 && ((unsigned char)dst[len] & 0xC0) == 0x80);
+        dst[len] = '\0';
+        char probe[WIDGET_TEXT_MAX + 4];
+        snprintf(probe, sizeof(probe), "%s...", dst);
+        if (lv_txt_get_width(probe, strlen(probe), font, 0, LV_TEXT_FLAG_NONE) <= max_w) {
+            strlcpy(dst, probe, dst_sz);
+            return;
+        }
+    }
+}
+
+esp_err_t widget_agenda_draw(const widget_agenda_spec_t *spec)
+{
+    if (!spec) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    ui_card_t card;
+    esp_err_t err = ui_card_begin(&card, spec->x, spec->y, spec->w, spec->h, spec->title);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    const int gap = 14;
+    const int col_w = (card.cw - gap) / 2;
+    const int col_r = col_w + gap;
+
+    ui_card_text(&card, 0, 0, col_w, "Termine", UI_MID, &lv_font_montserrat_14);
+    ui_card_text(&card, col_r, 0, col_w, "Aufgaben", UI_MID, &lv_font_montserrat_14);
+    ui_card_rect(&card, 0, 17, card.cw, 1, UI_LIGHT);
+    /* Column divider, stopping short of the waste badges. */
+    ui_card_rect(&card, col_w + gap / 2, 0, 1, card.ch - 30, UI_LIGHT);
+
+    /* --- appointments: two lines each, so the summary gets real width --- */
+    int n_ev = spec->event_count > WIDGET_AGENDA_MAX_EVENTS
+                   ? WIDGET_AGENDA_MAX_EVENTS : spec->event_count;
+    const int ev_row = 28;
+    char buf[WIDGET_TEXT_MAX + 24];
+    char fitted[WIDGET_TEXT_MAX + 8];
+
+    for (int i = 0; i < n_ev; i++) {
+        const widget_event_t *e = &spec->events[i];
+        int y = 24 + i * ev_row;
+        snprintf(buf, sizeof(buf), "%s  %s", e->src, e->when);
+        ui_card_text(&card, 0, y, col_w, buf, UI_MID, &lv_font_montserrat_14);
+        fit_text(fitted, sizeof(fitted), e->text, &lv_font_montserrat_14, col_w);
+        ui_card_text(&card, 0, y + 13, col_w, fitted, UI_BLACK, &lv_font_montserrat_14);
+    }
+    if (n_ev == 0) {
+        ui_card_text(&card, 0, 24, col_w, "keine Termine", UI_MID, &lv_font_montserrat_14);
+    }
+
+    /* --- tasks: one line each --- */
+    int n_td = spec->todo_count > WIDGET_AGENDA_MAX_TODOS
+                   ? WIDGET_AGENDA_MAX_TODOS : spec->todo_count;
+    const int td_row = 24;
+    for (int i = 0; i < n_td; i++) {
+        const widget_todo_t *t = &spec->todos[i];
+        int y = 24 + i * td_row;
+        ui_card_text(&card, col_r, y, 26, t->src, UI_MID, &lv_font_montserrat_14);
+        fit_text(fitted, sizeof(fitted), t->text, &lv_font_montserrat_14, col_w - 30);
+        ui_card_text(&card, col_r + 30, y, col_w - 30, fitted, UI_BLACK,
+                     &lv_font_montserrat_14);
+    }
+    if (n_td == 0) {
+        ui_card_text(&card, col_r, 24, col_w, "nichts offen", UI_MID, &lv_font_montserrat_14);
+    }
+
+    /* --- waste collection: small lettered badges, bottom-right --- */
+    int n_w = spec->waste_count > WIDGET_AGENDA_MAX_WASTE
+                  ? WIDGET_AGENDA_MAX_WASTE : spec->waste_count;
+    if (n_w > 0) {
+        const int bw = 20, bh = 20, bgap = 6;
+        int total = n_w * bw + (n_w - 1) * bgap;
+        int bx0 = card.cw - total;
+        int by = card.ch - 30;
+        for (int i = 0; i < n_w; i++) {
+            int bx = bx0 + i * (bw + bgap);
+            /* Filled box + knocked-out letter: at 20px this stays readable
+             * where an outlined glyph would smear on e-paper. */
+            ui_card_rect(&card, bx, by, bw, bh, UI_BLACK);
+            ui_text_ex(card.canvas, card.cx0 + bx, card.cy0 + by + 2, bw,
+                       spec->waste[i].letter, UI_WHITE, &lv_font_montserrat_14,
+                       LV_TEXT_ALIGN_CENTER, true);
+            ui_text_ex(card.canvas, card.cx0 + bx - 6, card.cy0 + by + bh + 1, bw + 12,
+                       spec->waste[i].label, UI_MID, &lv_font_montserrat_14,
+                       LV_TEXT_ALIGN_CENTER, false);
+        }
+    }
+
+    ESP_LOGI(TAG, "agenda '%s': %d events, %d todos, %d waste",
+             spec->title, n_ev, n_td, n_w);
+    return ESP_OK;
+}
+
 /* ------------------------------------------------------------- weather --- */
 
 /* Home Assistant condition slugs -> a coarse class we can actually draw. */
