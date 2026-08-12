@@ -214,6 +214,11 @@ AGENDA_TODO_LISTS = [
     "todo.alte_erinnerungen_von_google_notizen",
 ]
 
+# This list gets priority: all of its open items are shown first, and only
+# then is one item taken from each remaining list. Without that, the six
+# slots would simply be filled by whichever lists come first alphabetically.
+PRIORITY_TODO_LIST = "todo.elektro_glaser"
+
 WASTE_CALENDAR = "calendar.birkenweg_erlangen_bruck_mein_abfallkalender"
 
 # Summary text -> single letter. Matched case-insensitively on a substring,
@@ -283,16 +288,37 @@ def build_agenda_payload(hass: Hass, slot: str = "top-left", hours: int = 48) ->
         })
 
     # --- open tasks ---
-    todos = []
+    #
+    # Ordering: everything from PRIORITY_TODO_LIST first, then the single most
+    # urgent item from each remaining list, so one long list cannot crowd the
+    # others out. Within a list, the nearest due date wins; items without a
+    # due date sort last. Overdue items therefore come first, which is the
+    # intent -- they are the most "nearing" of all.
+    def _due_key(item):
+        due = item.get("due")
+        if not due:
+            return (1, "")
+        return (0, str(due))
+
+    by_list: dict[str, list[dict]] = {}
     for lst in AGENDA_TODO_LISTS:
         try:
             resp = hass.call_service("todo", "get_items",
                                      {"entity_id": lst, "status": "needs_action"})
+            items = resp.get(lst, {}).get("items", [])
         except HassError:
+            items = []
+        by_list[lst] = sorted(items, key=_due_key)
+
+    def _as_todo(lst, item):
+        return {"text": (item.get("summary") or "").strip(), "src": _abbrev(lst)}
+
+    todos = [_as_todo(PRIORITY_TODO_LIST, it)
+             for it in by_list.get(PRIORITY_TODO_LIST, [])]
+    for lst in AGENDA_TODO_LISTS:
+        if lst == PRIORITY_TODO_LIST or not by_list[lst]:
             continue
-        for item in resp.get(lst, {}).get("items", []):
-            todos.append({"text": (item.get("summary") or "").strip(),
-                          "src": _abbrev(lst)})
+        todos.append(_as_todo(lst, by_list[lst][0]))
     todos = todos[:6]
 
     # --- waste collection ---

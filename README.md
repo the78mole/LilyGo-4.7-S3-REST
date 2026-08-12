@@ -130,7 +130,13 @@ HOMEASSISTANT_TOKEN=<long-lived access token>
   All-day entries (`start.date`) and timed ones (`start.dateTime`) are both
   normalised for sorting.
 - **Tasks** (`todo.get_items`, `status: needs_action`): open items from six
-  todo lists, max 6 shown, likewise tagged with their origin.
+  todo lists, max 6 shown, likewise tagged with their origin. Ordering is
+  deliberate: everything from `PRIORITY_TODO_LIST` (Elektro-Glaser) comes
+  first, then the single most urgent item from each remaining list — otherwise
+  one long list fills all six slots and the others never appear. Within a
+  list the nearest due date wins and undated items sort last, so **overdue
+  items surface first**, which is the point. Note not every list carries due
+  dates (`todo.bizzmark` has none at all).
 - **Waste collection** (`calendar.birkenweg_...`): the next four pickups as
   lettered badges in the bottom-right corner — **R**estmüll, **G**elber Sack,
   **B**iomüll, **P**apier — each with its weekday and date.
