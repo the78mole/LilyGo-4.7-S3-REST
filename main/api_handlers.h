@@ -30,6 +30,16 @@ esp_err_t api_display_text_handler(httpd_req_t *req);
  * highlighted slot is derived from the device's own NTP-synced clock. */
 esp_err_t api_display_chart_handler(httpd_req_t *req);
 
+/* POST /api/display/list
+ * Body: {"items": [{"text": str, "done": bool}, ...], "slot": "...", "title": str} */
+esp_err_t api_display_list_handler(httpd_req_t *req);
+
+/* POST /api/display/weather
+ * Body: {"condition": <HA slug>, "temp": num, "temp_min"/"temp_max": num,
+ *        "precip": num, "wind": num, "forecast": [{"label": str, "temp": num}],
+ *        "slot": "...", "title": str} */
+esp_err_t api_display_weather_handler(httpd_req_t *req);
+
 /* GET /api/health */
 esp_err_t api_health_handler(httpd_req_t *req);
 

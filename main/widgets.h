@@ -1,0 +1,51 @@
+#pragma once
+
+#include <stdbool.h>
+#include "esp_err.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define WIDGET_LIST_MAX_ITEMS    8
+#define WIDGET_FORECAST_MAX      4
+#define WIDGET_TEXT_MAX          48
+
+typedef struct {
+    char text[WIDGET_TEXT_MAX];
+    bool done;
+} widget_list_item_t;
+
+typedef struct {
+    const char *title;
+    int x, y, w, h;
+    const widget_list_item_t *items;
+    int count;
+} widget_list_spec_t;
+
+typedef struct {
+    char label[8];   /* e.g. "21h" */
+    float temp;
+} widget_forecast_t;
+
+typedef struct {
+    const char *title;
+    int x, y, w, h;
+    const char *condition;  /* Home Assistant condition slug, e.g. "partlycloudy" */
+    float temp;
+    float temp_min, temp_max;
+    float precip;           /* mm */
+    float wind;             /* km/h */
+    bool has_range;
+    const widget_forecast_t *forecast;
+    int forecast_count;
+} widget_weather_spec_t;
+
+/* Both render one dashboard cell onto lv_scr_act().
+ * The caller must hold the LVGL lock. */
+esp_err_t widget_list_draw(const widget_list_spec_t *spec);
+esp_err_t widget_weather_draw(const widget_weather_spec_t *spec);
+
+#ifdef __cplusplus
+}
+#endif

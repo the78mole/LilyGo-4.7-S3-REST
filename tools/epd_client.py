@@ -65,6 +65,13 @@ class EpdClient:
     def display_text(self, text: str, x: int, y: int, size: int = 18) -> None:
         self._post("/api/display/text", json={"text": text, "x": x, "y": y, "size": size})
 
+    def display_list(self, items, slot: str = "top-left", title: str = "Aufgaben") -> None:
+        self._post("/api/display/list",
+                   json={"items": items, "slot": slot, "title": title})
+
+    def display_weather(self, payload: dict) -> None:
+        self._post("/api/display/weather", json=payload)
+
     def display_chart(self, values, slot: str = "today", **overrides) -> None:
         """Pushes data points only -- the device supplies the fixed 0..60
         ct/kWh axis, the 15-minute slot width, the cell geometry, and (for
@@ -155,22 +162,54 @@ def cmd_chart(client: EpdClient, args: argparse.Namespace) -> None:
           f"(axis + now-marker decided on-device)")
 
 
+# The task list is still placeholder data -- it will be generated elsewhere.
+DEMO_TASKS = [
+    {"text": "Firmware-Release taggen", "done": True},
+    {"text": "Flash-Backup nach GHCR", "done": True},
+    {"text": "Partial-Refresh bauen", "done": False},
+    {"text": "Gehaeuse fraesen", "done": False},
+    {"text": "Sensor-Board bestellen", "done": False},
+]
+
+
 def cmd_dashboard_live(client: EpdClient, args: argparse.Namespace) -> None:
-    """Hybrid dashboard: top row as one image, bottom row as on-device LVGL
-    charts so the 'now' bar tracks the panel's own clock."""
-    from dashboard import render_top_half, PRICES_TODAY, PRICES_TOMORROW
+    """All four cells rendered on-device, fed from Home Assistant."""
+    client.display_list(DEMO_TASKS, slot="top-left", title="Heute zu erledigen")
+    print(f"top-left : {len(DEMO_TASKS)} Aufgaben (Beispieldaten)")
 
-    top = render_top_half()
-    raw = encode_raw_image(top)
-    client.upload("top.bin", io.BytesIO(raw))
-    client.display_image("top.bin", 0, 0)
-    print(f"Top row: uploaded + placed ({top.size[0]}x{top.size[1]})")
+    if args.demo:
+        from dashboard import PRICES_TODAY, PRICES_TOMORROW
+        weather = {"slot": "top-right", "title": "Wetter (Demo)", "condition": "partlycloudy",
+                   "temp": 18.0, "temp_min": 11.0, "temp_max": 21.0, "precip": 0.4,
+                   "wind": 12.0,
+                   "forecast": [{"label": f"{h}h", "temp": t}
+                                for h, t in (("12", 20), ("15", 21), ("18", 19), ("21", 15))]}
+        today, tomorrow = PRICES_TODAY, PRICES_TOMORROW
+    else:
+        from hass import Hass, build_weather_payload
+        hass = Hass()
+        weather = build_weather_payload(hass, args.weather_entity, slot="top-right")
 
-    client.display_chart(PRICES_TODAY, slot="today")
-    print(f"Bottom left: {len(PRICES_TODAY)} slots, today (now-marker on-device)")
+        import datetime
+        by_day = hass.tibber_prices(days=2)
+        days = sorted(by_day)
+        today = by_day[days[0]]
+        tomorrow = by_day[days[1]] if len(days) > 1 else []
 
-    client.display_chart(PRICES_TOMORROW, slot="tomorrow")
-    print(f"Bottom right: {len(PRICES_TOMORROW)} slots, tomorrow")
+    client.display_weather(weather)
+    print(f"top-right: {weather['condition']}, {weather['temp']}C")
+
+    client.display_chart(today, slot="today")
+    print(f"bot-left : {len(today)} Slots heute (Now-Marker vom Geraet)")
+
+    if tomorrow:
+        client.display_chart(tomorrow, slot="tomorrow")
+        print(f"bot-right: {len(tomorrow)} Slots morgen")
+
+    over = [v for v in list(today) + list(tomorrow) if v > args.y_max]
+    if over:
+        print(f"\nHinweis: {len(over)} Werte liegen ueber {args.y_max} ct/kWh "
+              f"(max {max(over):.1f}) und werden im Chart gekappt und markiert.")
 
 
 def cmd_upload_demo(client: EpdClient, args: argparse.Namespace) -> None:
@@ -224,7 +263,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_chart.set_defaults(func=cmd_chart)
 
     p_live = sub.add_parser("dashboard-live",
-                            help="Top row as image + bottom row as on-device LVGL charts")
+                            help="All four cells rendered on-device, data from Home Assistant")
+    p_live.add_argument("--demo", action="store_true",
+                        help="Use placeholder data instead of querying Home Assistant")
+    p_live.add_argument("--weather-entity", default="weather.homebw")
+    p_live.add_argument("--y-max", type=float, default=60.0,
+                        help="Device-side chart ceiling, for the clipping hint only")
     p_live.set_defaults(func=cmd_dashboard_live)
 
     p_dash = sub.add_parser("dashboard", help="Render + push the 2x2 pseudo dashboard")

@@ -1,0 +1,107 @@
+#include "ui_card.h"
+
+#include <string.h>
+
+#include "esp_heap_caps.h"
+#include "esp_log.h"
+#include "sdkconfig.h"
+
+static const char *TAG = "ui_card";
+
+#define PANEL_W 960
+#define PANEL_H 540
+
+void ui_card_slot_rect(const char *slot, int *x, int *y, int *w, int *h)
+{
+    const int m = CONFIG_APP_CHART_MARGIN;
+    const int half_w = (PANEL_W - 3 * m) / 2;
+    const int half_h = (PANEL_H - 3 * m) / 2;
+
+    bool right = slot && strstr(slot, "right") != NULL;
+    bool bottom = slot && strstr(slot, "bottom") != NULL;
+
+    *x = right ? (m * 2 + half_w) : m;
+    *y = bottom ? (m * 2 + half_h) : m;
+    *w = half_w;
+    *h = half_h;
+}
+
+esp_err_t ui_card_begin(ui_card_t *card, int x, int y, int w, int h, const char *title)
+{
+    if (!card || w <= 0 || h <= 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    memset(card, 0, sizeof(*card));
+
+    size_t buf_bytes = (size_t)w * h * sizeof(lv_color_t);
+    card->buf = heap_caps_malloc(buf_bytes, MALLOC_CAP_SPIRAM);
+    if (!card->buf) {
+        ESP_LOGE(TAG, "canvas alloc failed (%u bytes)", (unsigned)buf_bytes);
+        return ESP_ERR_NO_MEM;
+    }
+
+    card->canvas = lv_canvas_create(lv_scr_act());
+    if (!card->canvas) {
+        heap_caps_free(card->buf);
+        card->buf = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_canvas_set_buffer(card->canvas, card->buf, w, h, LV_IMG_CF_TRUE_COLOR);
+    lv_canvas_fill_bg(card->canvas, UI_WHITE, LV_OPA_COVER);
+    lv_obj_set_pos(card->canvas, x, y);
+
+    card->w = w;
+    card->h = h;
+
+    lv_draw_rect_dsc_t rect;
+    lv_draw_rect_dsc_init(&rect);
+    rect.bg_opa = LV_OPA_COVER;
+    rect.bg_color = UI_WHITE;
+    rect.border_color = UI_BLACK;
+    rect.border_width = 2;
+    rect.border_opa = LV_OPA_COVER;
+    lv_canvas_draw_rect(card->canvas, 0, 0, w, h, &rect);
+
+    rect.border_width = 0;
+    rect.bg_color = UI_BLACK;
+    lv_canvas_draw_rect(card->canvas, 2, 2, w - 4, UI_TITLE_H, &rect);
+
+    lv_draw_label_dsc_t label;
+    lv_draw_label_dsc_init(&label);
+    label.font = &lv_font_montserrat_14;
+    label.color = UI_WHITE;
+    lv_canvas_draw_text(card->canvas, 10, 5, w - 20, &label, title ? title : "");
+
+    card->cx0 = 10;
+    card->cy0 = UI_TITLE_H + 6;
+    card->cw = w - 20;
+    card->ch = h - card->cy0 - 8;
+    return ESP_OK;
+}
+
+void ui_card_rect(ui_card_t *card, int x, int y, int w, int h, lv_color_t color)
+{
+    if (!card || !card->canvas || w <= 0 || h <= 0) {
+        return;
+    }
+    lv_draw_rect_dsc_t rect;
+    lv_draw_rect_dsc_init(&rect);
+    rect.bg_opa = LV_OPA_COVER;
+    rect.bg_color = color;
+    rect.border_width = 0;
+    lv_canvas_draw_rect(card->canvas, card->cx0 + x, card->cy0 + y, w, h, &rect);
+}
+
+void ui_card_text(ui_card_t *card, int x, int y, int max_w, const char *txt,
+                  lv_color_t color, const lv_font_t *font)
+{
+    if (!card || !card->canvas || !txt) {
+        return;
+    }
+    lv_draw_label_dsc_t label;
+    lv_draw_label_dsc_init(&label);
+    label.font = font ? font : &lv_font_montserrat_14;
+    label.color = color;
+    lv_canvas_draw_text(card->canvas, card->cx0 + x, card->cy0 + y, max_w, &label, txt);
+}

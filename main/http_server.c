@@ -50,6 +50,16 @@ esp_err_t http_server_start(void)
             .handler = api_display_text_handler,
         },
         {
+            .uri = "/api/display/list",
+            .method = HTTP_POST,
+            .handler = api_display_list_handler,
+        },
+        {
+            .uri = "/api/display/weather",
+            .method = HTTP_POST,
+            .handler = api_display_weather_handler,
+        },
+        {
             .uri = "/api/display/chart",
             .method = HTTP_POST,
             .handler = api_display_chart_handler,

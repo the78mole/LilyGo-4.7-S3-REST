@@ -87,6 +87,8 @@ LilyGo-Screen-4.7-S3/
 | POST   | `/api/display/image`  | `{"filename": "image.bin", "x": int, "y": int}` |
 | POST   | `/api/display/text`   | `{"text": "...", "x": int, "y": int, "size": int}` |
 | POST   | `/api/display/chart`  | `{"values": [<1..96 numbers>]}` — see below |
+| POST   | `/api/display/list`   | `{"items": [{"text": str, "done": bool}, ...]}` |
+| POST   | `/api/display/weather`| `{"condition": <HA slug>, "temp": num, ...}` |
 
 **Raw image format** (`/sdcard/*.bin`, produced by `tools/epd_client.py convert`):
 
@@ -96,7 +98,40 @@ offset 2: uint16 height  (little-endian)
 offset 4: width*height bytes, 8-bit grayscale, row-major
 ```
 
-### Charts are rendered on-device
+### The whole dashboard is rendered on-device
+
+All four cells of the 2x2 grid are drawn by the firmware on `lv_canvas`
+(`ui_card.c` provides the shared frame/palette/grid geometry; `chart.c` and
+`widgets.c` the content). Clients send **data, not pixels** — nothing renders
+a bitmap on the host any more.
+
+`"slot"` selects the cell: `top-left` | `top-right` | `bottom-left` |
+`bottom-right`. Charts accept `today` / `tomorrow` as aliases for the two
+bottom cells.
+
+### Data sources (Home Assistant)
+
+`tools/hass.py` pulls live data over the Home Assistant REST API, using
+credentials from the gitignored `.env`:
+
+```
+HOMEASSISTANT_URL=http://<host>:8123
+HOMEASSISTANT_TOKEN=<long-lived access token>
+```
+
+- `tibber.get_prices` → quarter-hourly prices. Tibber reports **EUR/kWh**, so
+  `hass.py` scales by 100 to the chart's ct/kWh axis rather than doing it on
+  the device.
+- `weather.get_forecasts` (`hourly`, also accepts `daily` / `twice_daily`) plus
+  the entity state, condensed into current conditions, today's min/max, 24h
+  precipitation and four look-ahead slots.
+
+```sh
+uv run epd_client.py --host <ip> dashboard-live                 # live from HA
+uv run epd_client.py --host <ip> dashboard-live --demo          # placeholder data
+```
+
+### Charts
 
 `/api/display/chart` deliberately takes **data points only** in the common
 case. Everything else has a firmware-side default (`Kconfig` → *Time / Chart*):

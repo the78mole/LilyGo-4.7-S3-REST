@@ -8,23 +8,17 @@
 #include "lvgl.h"
 #include "sdkconfig.h"
 #include "time_sync.h"
+#include "ui_card.h"
 
 static const char *TAG = "chart";
 
-/* LV_COLOR_DEPTH=8 is RGB332, so only a handful of greys survive the round
- * trip through lvgl_port's luminance conversion. Use well-separated levels. */
-static inline lv_color_t grey(uint8_t v)
-{
-    return lv_color_make(v, v, v);
-}
+#define C_BLACK UI_BLACK
+#define C_DARK  UI_DARK
+#define C_MID   UI_MID
+#define C_LIGHT UI_LIGHT
+#define C_WHITE UI_WHITE
 
-#define C_BLACK grey(0)
-#define C_DARK  grey(85)
-#define C_MID   grey(150)
-#define C_LIGHT grey(200)
-#define C_WHITE grey(255)
-
-#define TITLE_H     26
+#define TITLE_H     UI_TITLE_H
 #define AXIS_LEFT   30
 #define AXIS_BOTTOM 16
 #define CAPTION_H   14

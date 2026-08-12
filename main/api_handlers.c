@@ -8,6 +8,8 @@
 #include "app_config.h"
 #include "cJSON.h"
 #include "chart.h"
+#include "ui_card.h"
+#include "widgets.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "lvgl.h"
@@ -353,11 +355,12 @@ esp_err_t api_display_chart_handler(httpd_req_t *req)
      * the now-marker (highlighting "now" on tomorrow's curve is meaningless). */
     char title[64] = "Strompreis heute";
     cJSON *jslot = cJSON_GetObjectItemCaseSensitive(root, "slot");
-    if (cJSON_IsString(jslot) && strcmp(jslot->valuestring, "tomorrow") == 0) {
-        spec.x = 960 / 2 + CONFIG_APP_CHART_MARGIN / 2;
-        spec.highlight_now = false;
-        strlcpy(title, "Strompreis morgen", sizeof(title));
-    }
+    bool tomorrow = cJSON_IsString(jslot) && strcmp(jslot->valuestring, "tomorrow") == 0;
+    /* Highlighting "now" on tomorrow's curve would be meaningless. */
+    spec.highlight_now = !tomorrow;
+    strlcpy(title, tomorrow ? "Strompreis morgen" : "Strompreis heute", sizeof(title));
+    ui_card_slot_rect(tomorrow ? "bottom-right" : "bottom-left",
+                      &spec.x, &spec.y, &spec.w, &spec.h);
 
     cJSON *jtitle = cJSON_GetObjectItemCaseSensitive(root, "title");
     if (cJSON_IsString(jtitle)) {
@@ -391,6 +394,150 @@ esp_err_t api_display_chart_handler(httpd_req_t *req)
 
     if (derr != ESP_OK) {
         return send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "chart draw failed");
+    }
+    return send_ok(req);
+}
+
+esp_err_t api_display_list_handler(httpd_req_t *req)
+{
+    char *body;
+    if (read_json_body(req, &body) != ESP_OK) {
+        return send_err(req, HTTPD_400_BAD_REQUEST, "missing/oversized JSON body");
+    }
+    cJSON *root = cJSON_Parse(body);
+    free(body);
+    if (!root) {
+        return send_err(req, HTTPD_400_BAD_REQUEST, "invalid JSON");
+    }
+
+    cJSON *jitems = cJSON_GetObjectItemCaseSensitive(root, "items");
+    if (!cJSON_IsArray(jitems) || cJSON_GetArraySize(jitems) <= 0) {
+        cJSON_Delete(root);
+        return send_err(req, HTTPD_400_BAD_REQUEST, "expected \"items\": [ ... ]");
+    }
+
+    int count = cJSON_GetArraySize(jitems);
+    if (count > WIDGET_LIST_MAX_ITEMS) {
+        count = WIDGET_LIST_MAX_ITEMS;
+    }
+
+    widget_list_item_t *items = calloc(count, sizeof(*items));
+    if (!items) {
+        cJSON_Delete(root);
+        return send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "out of memory");
+    }
+    for (int i = 0; i < count; i++) {
+        cJSON *it = cJSON_GetArrayItem(jitems, i);
+        cJSON *jt = cJSON_GetObjectItemCaseSensitive(it, "text");
+        cJSON *jd = cJSON_GetObjectItemCaseSensitive(it, "done");
+        strlcpy(items[i].text, cJSON_IsString(jt) ? jt->valuestring : "?",
+                sizeof(items[i].text));
+        items[i].done = cJSON_IsTrue(jd);
+    }
+
+    widget_list_spec_t spec = {0};
+    spec.items = items;
+    spec.count = count;
+
+    cJSON *jslot = cJSON_GetObjectItemCaseSensitive(root, "slot");
+    ui_card_slot_rect(cJSON_IsString(jslot) ? jslot->valuestring : "top-left",
+                      &spec.x, &spec.y, &spec.w, &spec.h);
+
+    char title[64] = "Aufgaben";
+    cJSON *jtitle = cJSON_GetObjectItemCaseSensitive(root, "title");
+    if (cJSON_IsString(jtitle)) {
+        strlcpy(title, jtitle->valuestring, sizeof(title));
+    }
+    spec.title = title;
+    cJSON_Delete(root);
+
+    if (!lvgl_port_lock(LVGL_LOCK_TIMEOUT_MS)) {
+        free(items);
+        return send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "display busy");
+    }
+    esp_err_t derr = widget_list_draw(&spec);
+    lvgl_port_unlock();
+    free(items);
+
+    if (derr != ESP_OK) {
+        return send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "list draw failed");
+    }
+    return send_ok(req);
+}
+
+esp_err_t api_display_weather_handler(httpd_req_t *req)
+{
+    char *body;
+    if (read_json_body(req, &body) != ESP_OK) {
+        return send_err(req, HTTPD_400_BAD_REQUEST, "missing/oversized JSON body");
+    }
+    cJSON *root = cJSON_Parse(body);
+    free(body);
+    if (!root) {
+        return send_err(req, HTTPD_400_BAD_REQUEST, "invalid JSON");
+    }
+
+    widget_weather_spec_t spec = {0};
+    char condition[32] = "cloudy";
+    char title[64] = "Wetter";
+
+    cJSON *j;
+    if (cJSON_IsString(j = cJSON_GetObjectItemCaseSensitive(root, "condition"))) {
+        strlcpy(condition, j->valuestring, sizeof(condition));
+    }
+    if (cJSON_IsString(j = cJSON_GetObjectItemCaseSensitive(root, "title"))) {
+        strlcpy(title, j->valuestring, sizeof(title));
+    }
+    if (cJSON_IsNumber(j = cJSON_GetObjectItemCaseSensitive(root, "temp"))) {
+        spec.temp = (float)j->valuedouble;
+    }
+    cJSON *jmin = cJSON_GetObjectItemCaseSensitive(root, "temp_min");
+    cJSON *jmax = cJSON_GetObjectItemCaseSensitive(root, "temp_max");
+    if (cJSON_IsNumber(jmin) && cJSON_IsNumber(jmax)) {
+        spec.temp_min = (float)jmin->valuedouble;
+        spec.temp_max = (float)jmax->valuedouble;
+        spec.has_range = true;
+    }
+    if (cJSON_IsNumber(j = cJSON_GetObjectItemCaseSensitive(root, "precip"))) {
+        spec.precip = (float)j->valuedouble;
+    }
+    if (cJSON_IsNumber(j = cJSON_GetObjectItemCaseSensitive(root, "wind"))) {
+        spec.wind = (float)j->valuedouble;
+    }
+
+    widget_forecast_t fc[WIDGET_FORECAST_MAX] = {0};
+    cJSON *jfc = cJSON_GetObjectItemCaseSensitive(root, "forecast");
+    if (cJSON_IsArray(jfc)) {
+        int n = cJSON_GetArraySize(jfc);
+        if (n > WIDGET_FORECAST_MAX) n = WIDGET_FORECAST_MAX;
+        for (int i = 0; i < n; i++) {
+            cJSON *e = cJSON_GetArrayItem(jfc, i);
+            cJSON *jl = cJSON_GetObjectItemCaseSensitive(e, "label");
+            cJSON *jt = cJSON_GetObjectItemCaseSensitive(e, "temp");
+            strlcpy(fc[i].label, cJSON_IsString(jl) ? jl->valuestring : "?",
+                    sizeof(fc[i].label));
+            fc[i].temp = cJSON_IsNumber(jt) ? (float)jt->valuedouble : 0.0f;
+        }
+        spec.forecast = fc;
+        spec.forecast_count = n;
+    }
+
+    cJSON *jslot = cJSON_GetObjectItemCaseSensitive(root, "slot");
+    ui_card_slot_rect(cJSON_IsString(jslot) ? jslot->valuestring : "top-right",
+                      &spec.x, &spec.y, &spec.w, &spec.h);
+    cJSON_Delete(root);
+
+    spec.condition = condition;
+    spec.title = title;
+
+    if (!lvgl_port_lock(LVGL_LOCK_TIMEOUT_MS)) {
+        return send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "display busy");
+    }
+    esp_err_t derr = widget_weather_draw(&spec);
+    lvgl_port_unlock();
+
+    if (derr != ESP_OK) {
+        return send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "weather draw failed");
     }
     return send_ok(req);
 }

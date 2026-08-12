@@ -8,6 +8,8 @@ idf_component_register(
         "http_server.c"
         "api_handlers.c"
         "chart.c"
+        "ui_card.c"
+        "widgets.c"
         "time_sync.c"
     INCLUDE_DIRS "."
     REQUIRES
