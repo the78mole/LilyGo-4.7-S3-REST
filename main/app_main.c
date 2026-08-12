@@ -5,6 +5,7 @@
 #include "http_server.h"
 #include "lvgl_port.h"
 #include "sd_card.h"
+#include "time_sync.h"
 #include "wifi_manager.h"
 
 static const char *TAG = "app_main";
@@ -35,6 +36,12 @@ void app_main(void)
     if (wifi_manager_start() != ESP_OK) {
         ESP_LOGW(TAG, "Wi-Fi did not connect -- REST API will only be reachable "
                       "once connectivity is restored");
+    }
+
+    /* After Wi-Fi: charts derive their "now" marker from this clock, so a
+     * client never has to send a highlight index. */
+    if (time_sync_start() != ESP_OK) {
+        ESP_LOGW(TAG, "SNTP start failed -- charts will render without a now-marker");
     }
 
     ESP_LOGI(TAG, "Starting REST API...");

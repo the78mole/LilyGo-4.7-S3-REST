@@ -7,6 +7,8 @@ idf_component_register(
         "lvgl_port.c"
         "http_server.c"
         "api_handlers.c"
+        "chart.c"
+        "time_sync.c"
     INCLUDE_DIRS "."
     REQUIRES
         esp_wifi
@@ -20,6 +22,7 @@ idf_component_register(
         json
         esp_timer
         vfs
+        lwip
         # Managed component pulled in via idf_component.yml.
         lvgl
         # Local component: components/lilygo_epd47 (vendored LilyGo-EPD47).

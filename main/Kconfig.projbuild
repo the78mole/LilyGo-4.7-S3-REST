@@ -67,6 +67,42 @@ menu "LilyGo T5-4.7 S3 Application"
                 does not share this bus.
     endmenu
 
+    menu "Time / Chart"
+        config APP_NTP_SERVER
+            string "NTP server"
+            default "pool.ntp.org"
+            help
+                Used to establish local time so charts can highlight the slot
+                that is current right now. The client only supplies data
+                points, never the highlight index.
+
+        config APP_TIMEZONE
+            string "POSIX TZ string"
+            default "CET-1CEST,M3.5.0,M10.5.0/3"
+            help
+                Default is Europe/Berlin incl. DST. Note the inverted sign
+                convention: CET-1 means UTC+1.
+
+        config APP_CHART_Y_MAX
+            int "Chart y-axis maximum (ct/kWh)"
+            default 60
+            help
+                The y axis is fixed at 0..this value rather than auto-scaled,
+                so charts stay comparable between days. Values above it are
+                clamped and flagged with a marker.
+
+        config APP_CHART_INTERVAL_MIN
+            int "Minutes per chart slot"
+            default 15
+            help
+                15 -> 96 slots per day, matching quarter-hourly dynamic
+                electricity tariffs.
+
+        config APP_CHART_MARGIN
+            int "Dashboard cell margin (px)"
+            default 10
+    endmenu
+
     menu "RTOS Task Placement"
         config APP_TASK_CORE_NETWORK
             int "Core for Wi-Fi / HTTP server tasks"

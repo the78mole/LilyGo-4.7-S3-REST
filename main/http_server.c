@@ -49,6 +49,11 @@ esp_err_t http_server_start(void)
             .method = HTTP_POST,
             .handler = api_display_text_handler,
         },
+        {
+            .uri = "/api/display/chart",
+            .method = HTTP_POST,
+            .handler = api_display_chart_handler,
+        },
     };
 
     for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); i++) {

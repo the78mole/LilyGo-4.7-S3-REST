@@ -17,6 +17,9 @@ Commands:
     upload-demo                     Generate + upload a demo image and a
                                      text label, then place both. Used by
                                      `make upload-assets`.
+    dashboard                       Render the 2x2 pseudo dashboard
+                                     (tasks / weather / power prices) and
+                                     push it as one full-screen image.
 """
 
 from __future__ import annotations
@@ -61,6 +64,15 @@ class EpdClient:
 
     def display_text(self, text: str, x: int, y: int, size: int = 18) -> None:
         self._post("/api/display/text", json={"text": text, "x": x, "y": y, "size": size})
+
+    def display_chart(self, values, slot: str = "today", **overrides) -> None:
+        """Pushes data points only -- the device supplies the fixed 0..60
+        ct/kWh axis, the 15-minute slot width, the cell geometry, and (for
+        `slot="today"`) derives the highlighted quarter-hour from its own
+        NTP-synced clock."""
+        payload = {"values": [round(float(v), 2) for v in values], "slot": slot}
+        payload.update(overrides)
+        self._post("/api/display/chart", json=payload)
 
 
 def encode_raw_image(img: Image.Image) -> bytes:
@@ -119,6 +131,48 @@ def cmd_display_text(client: EpdClient, args: argparse.Namespace) -> None:
     print(f"Placed text at ({args.x}, {args.y})")
 
 
+def cmd_dashboard(client: EpdClient, args: argparse.Namespace) -> None:
+    from dashboard import render_dashboard
+
+    img = render_dashboard(now_hour=args.now_hour)
+    raw = encode_raw_image(img)
+    if args.out:
+        Path(args.out).write_bytes(raw)
+        print(f"Wrote {args.out} ({len(raw)} bytes)")
+
+    client.upload("layout.bin", io.BytesIO(raw))
+    print(f"Uploaded layout.bin ({len(raw)} bytes)")
+    client.display_image("layout.bin", 0, 0)
+    print("Placed dashboard at (0, 0) -- panel refresh takes a few seconds")
+
+
+def cmd_chart(client: EpdClient, args: argparse.Namespace) -> None:
+    from dashboard import PRICES_TODAY, PRICES_TOMORROW
+
+    values = PRICES_TOMORROW if args.slot == "tomorrow" else PRICES_TODAY
+    client.display_chart(values, slot=args.slot)
+    print(f"Pushed {len(values)} slots for '{args.slot}' "
+          f"(axis + now-marker decided on-device)")
+
+
+def cmd_dashboard_live(client: EpdClient, args: argparse.Namespace) -> None:
+    """Hybrid dashboard: top row as one image, bottom row as on-device LVGL
+    charts so the 'now' bar tracks the panel's own clock."""
+    from dashboard import render_top_half, PRICES_TODAY, PRICES_TOMORROW
+
+    top = render_top_half()
+    raw = encode_raw_image(top)
+    client.upload("top.bin", io.BytesIO(raw))
+    client.display_image("top.bin", 0, 0)
+    print(f"Top row: uploaded + placed ({top.size[0]}x{top.size[1]})")
+
+    client.display_chart(PRICES_TODAY, slot="today")
+    print(f"Bottom left: {len(PRICES_TODAY)} slots, today (now-marker on-device)")
+
+    client.display_chart(PRICES_TOMORROW, slot="tomorrow")
+    print(f"Bottom right: {len(PRICES_TOMORROW)} slots, tomorrow")
+
+
 def cmd_upload_demo(client: EpdClient, args: argparse.Namespace) -> None:
     demo_bytes = make_demo_image()
     client.upload("demo.bin", io.BytesIO(demo_bytes))
@@ -164,6 +218,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_demo = sub.add_parser("upload-demo", help="Generate + upload + place a demo image and text")
     p_demo.set_defaults(func=cmd_upload_demo)
+
+    p_chart = sub.add_parser("chart", help="Push a price curve; device draws it with LVGL")
+    p_chart.add_argument("--slot", choices=("today", "tomorrow"), default="today")
+    p_chart.set_defaults(func=cmd_chart)
+
+    p_live = sub.add_parser("dashboard-live",
+                            help="Top row as image + bottom row as on-device LVGL charts")
+    p_live.set_defaults(func=cmd_dashboard_live)
+
+    p_dash = sub.add_parser("dashboard", help="Render + push the 2x2 pseudo dashboard")
+    p_dash.add_argument("--now-hour", type=int, default=14,
+                        help="Hour to highlight in today's price chart (0-23)")
+    p_dash.add_argument("--out", help="Also write the raw image to this path")
+    p_dash.set_defaults(func=cmd_dashboard)
 
     return parser
 

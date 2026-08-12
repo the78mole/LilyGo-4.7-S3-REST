@@ -7,6 +7,7 @@
 
 #include "app_config.h"
 #include "cJSON.h"
+#include "chart.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "lvgl.h"
@@ -18,7 +19,8 @@
 static const char *TAG = "api_handlers";
 
 #define UPLOAD_CHUNK_SIZE   4096
-#define JSON_BODY_MAX_BYTES 4096
+/* 96 quarter-hour values plus framing; generous but still bounded. */
+#define JSON_BODY_MAX_BYTES 8192
 #define SD_LOCK_TIMEOUT_MS  5000
 #define LVGL_LOCK_TIMEOUT_MS 5000
 
@@ -297,6 +299,99 @@ esp_err_t api_display_image_handler(httpd_req_t *req)
     lvgl_port_unlock();
 
     ESP_LOGI(TAG, "Placed image '%s' (%ux%u) at (%d,%d)", filename, width, height, x, y);
+    return send_ok(req);
+}
+
+esp_err_t api_display_chart_handler(httpd_req_t *req)
+{
+    char *body;
+    if (read_json_body(req, &body) != ESP_OK) {
+        return send_err(req, HTTPD_400_BAD_REQUEST, "missing/oversized JSON body");
+    }
+
+    cJSON *root = cJSON_Parse(body);
+    free(body);
+    if (!root) {
+        return send_err(req, HTTPD_400_BAD_REQUEST, "invalid JSON");
+    }
+
+    cJSON *jvalues = cJSON_GetObjectItemCaseSensitive(root, "values");
+    if (!cJSON_IsArray(jvalues)) {
+        cJSON_Delete(root);
+        return send_err(req, HTTPD_400_BAD_REQUEST, "expected \"values\": [ ... ]");
+    }
+
+    int count = cJSON_GetArraySize(jvalues);
+    if (count <= 0 || count > CHART_MAX_SLOTS) {
+        cJSON_Delete(root);
+        return send_err(req, HTTPD_400_BAD_REQUEST, "values must hold 1..96 numbers");
+    }
+
+    float *values = malloc((size_t)count * sizeof(float));
+    if (!values) {
+        cJSON_Delete(root);
+        return send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "out of memory");
+    }
+    for (int i = 0; i < count; i++) {
+        cJSON *item = cJSON_GetArrayItem(jvalues, i);
+        if (!cJSON_IsNumber(item)) {
+            free(values);
+            cJSON_Delete(root);
+            return send_err(req, HTTPD_400_BAD_REQUEST, "values must all be numbers");
+        }
+        values[i] = (float)item->valuedouble;
+    }
+
+    /* Everything except the data has an on-device default; a minimal request
+     * is just {"values": [...]}. */
+    chart_spec_t spec;
+    chart_spec_defaults(&spec);
+    spec.values = values;
+    spec.count = count;
+
+    /* "slot" picks one of the two dashboard cells and, for tomorrow, disables
+     * the now-marker (highlighting "now" on tomorrow's curve is meaningless). */
+    char title[64] = "Strompreis heute";
+    cJSON *jslot = cJSON_GetObjectItemCaseSensitive(root, "slot");
+    if (cJSON_IsString(jslot) && strcmp(jslot->valuestring, "tomorrow") == 0) {
+        spec.x = 960 / 2 + CONFIG_APP_CHART_MARGIN / 2;
+        spec.highlight_now = false;
+        strlcpy(title, "Strompreis morgen", sizeof(title));
+    }
+
+    cJSON *jtitle = cJSON_GetObjectItemCaseSensitive(root, "title");
+    if (cJSON_IsString(jtitle)) {
+        strlcpy(title, jtitle->valuestring, sizeof(title));
+    }
+    spec.title = title;
+
+    /* Optional overrides. */
+    cJSON *j;
+    if (cJSON_IsNumber(j = cJSON_GetObjectItemCaseSensitive(root, "x"))) spec.x = j->valueint;
+    if (cJSON_IsNumber(j = cJSON_GetObjectItemCaseSensitive(root, "y"))) spec.y = j->valueint;
+    if (cJSON_IsNumber(j = cJSON_GetObjectItemCaseSensitive(root, "w"))) spec.w = j->valueint;
+    if (cJSON_IsNumber(j = cJSON_GetObjectItemCaseSensitive(root, "h"))) spec.h = j->valueint;
+    if (cJSON_IsNumber(j = cJSON_GetObjectItemCaseSensitive(root, "y_max"))) spec.y_max = (float)j->valuedouble;
+    if (cJSON_IsNumber(j = cJSON_GetObjectItemCaseSensitive(root, "interval_min"))) spec.interval_min = j->valueint;
+    if (cJSON_IsBool(j = cJSON_GetObjectItemCaseSensitive(root, "highlight_now"))) spec.highlight_now = cJSON_IsTrue(j);
+
+    cJSON_Delete(root);
+
+    if (!lvgl_port_lock(LVGL_LOCK_TIMEOUT_MS)) {
+        free(values);
+        return send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "display busy");
+    }
+    esp_err_t derr = chart_draw(&spec);
+    lvgl_port_unlock();
+
+    /* chart_draw copies what it needs into the canvas bitmap, so the source
+     * samples can go away immediately -- unlike the image handler, this leaks
+     * only the canvas buffer, not the input data. */
+    free(values);
+
+    if (derr != ESP_OK) {
+        return send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "chart draw failed");
+    }
     return send_ok(req);
 }
 

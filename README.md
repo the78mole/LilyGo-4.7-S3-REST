@@ -68,6 +68,9 @@ LilyGo-Screen-4.7-S3/
   succeed; with `epd_init()` alone (no power-on, no refresh, no drawing),
   0/10 succeed; with the panel initialised first, 10/10 succeed again. So this
   is a peripheral/DMA init-order constraint, not a current-draw brownout.
+- **Time**: SNTP (`time_sync.c`) with a POSIX `TZ` string, started once Wi-Fi
+  is up. Exists so the panel can decide for itself which quarter-hour of a
+  price curve is "now".
 - **Concurrency**: two dedicated mutexes —
   `sd_card_lock()/unlock()` around all VFS access, and
   `lvgl_port_lock()/unlock()` around all `lv_*` calls made from outside
@@ -83,6 +86,7 @@ LilyGo-Screen-4.7-S3/
 | POST   | `/api/upload?filename=NAME` | raw bytes, streamed straight to `/sdcard/NAME` |
 | POST   | `/api/display/image`  | `{"filename": "image.bin", "x": int, "y": int}` |
 | POST   | `/api/display/text`   | `{"text": "...", "x": int, "y": int, "size": int}` |
+| POST   | `/api/display/chart`  | `{"values": [<1..96 numbers>]}` — see below |
 
 **Raw image format** (`/sdcard/*.bin`, produced by `tools/epd_client.py convert`):
 
@@ -90,6 +94,37 @@ LilyGo-Screen-4.7-S3/
 offset 0: uint16 width   (little-endian)
 offset 2: uint16 height  (little-endian)
 offset 4: width*height bytes, 8-bit grayscale, row-major
+```
+
+### Charts are rendered on-device
+
+`/api/display/chart` deliberately takes **data points only** in the common
+case. Everything else has a firmware-side default (`Kconfig` → *Time / Chart*):
+
+- **Fixed y axis `0 .. CONFIG_APP_CHART_Y_MAX`** (default 60 ct/kWh) rather
+  than auto-scaling, so a curve looks the same height on a cheap day as on an
+  expensive one. Values above the maximum are clamped *and* flagged with a
+  marker, so an outlier can never masquerade as exactly `y_max`.
+- **`CONFIG_APP_CHART_INTERVAL_MIN`** (default 15 → 96 slots/day), matching
+  quarter-hourly dynamic tariffs.
+- **Cell geometry** from `"slot": "today" | "tomorrow"`, which picks the
+  bottom-left / bottom-right cell of the 2x2 dashboard grid.
+- **The highlighted "now" bar is computed by the device** from its own
+  SNTP-synced clock (`time_sync.c`), not sent by the client — a client with a
+  skewed clock therefore cannot mislabel the display. Without a valid clock
+  the chart renders with no highlight and prints `--:--  (no NTP)` instead of
+  guessing.
+
+Optional overrides: `title`, `x`, `y`, `w`, `h`, `y_max`, `interval_min`,
+`highlight_now`.
+
+Drawn on an `lv_canvas` rather than `lv_chart`, because `lv_chart` cannot style
+one individual bar differently — and a single canvas object beats ~96 LVGL
+objects on a panel this size.
+
+```sh
+uv run epd_client.py --host <ip> chart --slot today
+uv run epd_client.py --host <ip> dashboard-live   # image top row + LVGL charts
 ```
 
 Images and text labels are placed unscaled and are **not** garbage
