@@ -124,7 +124,15 @@ HOMEASSISTANT_TOKEN=<long-lived access token>
   the device.
 - `weather.get_forecasts` (`hourly`, also accepts `daily` / `twice_daily`) plus
   the entity state, condensed into current conditions, today's min/max, 24h
-  precipitation and four look-ahead slots.
+  precipitation, four look-ahead slots, and two 24h hourly series driving the
+  sparklines in the weather cell (temperature and precipitation probability).
+
+  **Not every weather integration provides `precipitation_probability`.**
+  `weather.homebw` does not (it exposes only `precipitation` in mm),
+  `weather.openweathermap` does — hence the latter is the default for
+  `--weather-entity`. When the field is absent, `hass.py` simply omits the
+  series and the widget drops that sparkline rather than plotting fabricated
+  zeros.
 
 ```sh
 uv run epd_client.py --host <ip> dashboard-live                 # live from HA

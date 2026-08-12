@@ -9,6 +9,7 @@ extern "C" {
 
 #define WIDGET_LIST_MAX_ITEMS    8
 #define WIDGET_FORECAST_MAX      4
+#define WIDGET_SERIES_MAX        24  /* 24h of hourly sparkline samples */
 #define WIDGET_TEXT_MAX          48
 
 typedef struct {
@@ -35,8 +36,15 @@ typedef struct {
     float temp;
     float temp_min, temp_max;
     float precip;           /* mm */
+    float precip_prob;      /* % */
     float wind;             /* km/h */
     bool has_range;
+    bool has_precip_prob;
+    /* Next-24h hourly series for the two sparklines. Either may be empty. */
+    const float *temp_series;
+    int temp_series_count;
+    const float *pop_series;   /* precipitation probability, 0..100 */
+    int pop_series_count;
     const widget_forecast_t *forecast;
     int forecast_count;
 } widget_weather_spec_t;

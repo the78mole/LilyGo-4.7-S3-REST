@@ -504,6 +504,37 @@ esp_err_t api_display_weather_handler(httpd_req_t *req)
     if (cJSON_IsNumber(j = cJSON_GetObjectItemCaseSensitive(root, "wind"))) {
         spec.wind = (float)j->valuedouble;
     }
+    if (cJSON_IsNumber(j = cJSON_GetObjectItemCaseSensitive(root, "precip_prob"))) {
+        spec.precip_prob = (float)j->valuedouble;
+        spec.has_precip_prob = true;
+    }
+
+    /* Optional 24h hourly series for the two sparklines. */
+    float temp_series[WIDGET_SERIES_MAX];
+    float pop_series[WIDGET_SERIES_MAX];
+    struct { const char *key; float *dst; const float **out; int *out_n; } series[] = {
+        { "temp_series", temp_series, &spec.temp_series, &spec.temp_series_count },
+        { "pop_series",  pop_series,  &spec.pop_series,  &spec.pop_series_count  },
+    };
+    for (size_t k = 0; k < sizeof(series) / sizeof(series[0]); k++) {
+        cJSON *arr = cJSON_GetObjectItemCaseSensitive(root, series[k].key);
+        if (!cJSON_IsArray(arr)) {
+            continue;
+        }
+        int n = cJSON_GetArraySize(arr);
+        if (n > WIDGET_SERIES_MAX) n = WIDGET_SERIES_MAX;
+        int used = 0;
+        for (int i = 0; i < n; i++) {
+            cJSON *e = cJSON_GetArrayItem(arr, i);
+            if (cJSON_IsNumber(e)) {
+                series[k].dst[used++] = (float)e->valuedouble;
+            }
+        }
+        if (used > 0) {
+            *series[k].out = series[k].dst;
+            *series[k].out_n = used;
+        }
+    }
 
     widget_forecast_t fc[WIDGET_FORECAST_MAX] = {0};
     cJSON *jfc = cJSON_GetObjectItemCaseSensitive(root, "forecast");

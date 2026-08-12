@@ -141,17 +141,32 @@ def build_weather_payload(hass: Hass, entity_id: str, slot: str = "top-right") -
     if len(today_temps) < 2:
         today_temps = [f["temperature"] for _, f in upcoming[:24] if "temperature" in f]
 
+    next24 = upcoming[:24]
+
     payload = {
         "slot": slot,
         "title": f"Wetter - {attrs.get('friendly_name', entity_id)}",
         "condition": state.get("state", "cloudy"),
         "temp": attrs.get("temperature", 0.0),
-        "precip": sum(f.get("precipitation", 0.0) or 0.0 for _, f in upcoming[:24]),
+        "precip": sum(f.get("precipitation", 0.0) or 0.0 for _, f in next24),
         "wind": attrs.get("wind_speed", 0.0),
     }
     if today_temps:
         payload["temp_min"] = min(today_temps)
         payload["temp_max"] = max(today_temps)
+
+    # Sparkline series for the next 24 hours. Not every weather integration
+    # supplies precipitation_probability (weather.homebw does not,
+    # weather.openweathermap does), so send it only when it is actually there
+    # rather than fabricating zeros.
+    temps = [f.get("temperature") for _, f in next24]
+    if all(t is not None for t in temps) and len(temps) >= 2:
+        payload["temp_series"] = [round(float(t), 1) for t in temps]
+
+    pops = [f.get("precipitation_probability") for _, f in next24]
+    if any(p is not None for p in pops):
+        payload["pop_series"] = [round(float(p or 0.0), 0) for p in pops]
+        payload["precip_prob"] = max(float(p or 0.0) for p in pops)
 
     # Four evenly spaced look-ahead slots (+3h, +6h, +9h, +12h).
     fc = []

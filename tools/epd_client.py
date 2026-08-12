@@ -179,9 +179,16 @@ def cmd_dashboard_live(client: EpdClient, args: argparse.Namespace) -> None:
 
     if args.demo:
         from dashboard import PRICES_TODAY, PRICES_TOMORROW
+        # Deliberately varied series so the two sparklines can be judged even
+        # when the real forecast is flat (e.g. a cloudless day).
+        demo_temps = [15, 14, 13, 13, 12, 12, 13, 15, 17, 19, 20, 21,
+                      22, 22, 21, 20, 19, 18, 17, 16, 16, 15, 15, 14]
+        demo_pop = [0, 0, 0, 5, 10, 20, 35, 55, 70, 80, 65, 40,
+                    20, 10, 5, 0, 0, 15, 45, 60, 40, 20, 10, 5]
         weather = {"slot": "top-right", "title": "Wetter (Demo)", "condition": "partlycloudy",
-                   "temp": 18.0, "temp_min": 11.0, "temp_max": 21.0, "precip": 0.4,
-                   "wind": 12.0,
+                   "temp": 18.0, "temp_min": 11.0, "temp_max": 22.0, "precip": 2.4,
+                   "wind": 12.0, "precip_prob": max(demo_pop),
+                   "temp_series": demo_temps, "pop_series": demo_pop,
                    "forecast": [{"label": f"{h}h", "temp": t}
                                 for h, t in (("12", 20), ("15", 21), ("18", 19), ("21", 15))]}
         today, tomorrow = PRICES_TODAY, PRICES_TOMORROW
@@ -266,7 +273,8 @@ def build_parser() -> argparse.ArgumentParser:
                             help="All four cells rendered on-device, data from Home Assistant")
     p_live.add_argument("--demo", action="store_true",
                         help="Use placeholder data instead of querying Home Assistant")
-    p_live.add_argument("--weather-entity", default="weather.homebw")
+    p_live.add_argument("--weather-entity", default="weather.openweathermap",
+                        help="Needs precipitation_probability for the rain sparkline; weather.homebw does not provide it")
     p_live.add_argument("--y-max", type=float, default=60.0,
                         help="Device-side chart ceiling, for the clipping hint only")
     p_live.set_defaults(func=cmd_dashboard_live)
