@@ -176,8 +176,15 @@ case. Everything else has a firmware-side default (`Kconfig` → *Time / Chart*)
   the chart renders with no highlight and prints `--:--  (no NTP)` instead of
   guessing.
 
-Optional overrides: `title`, `x`, `y`, `w`, `h`, `y_max`, `interval_min`,
-`highlight_now`.
+- **An empty `values` array is valid** and renders a framed "Noch keine Daten"
+  card instead of a plot. Day-ahead prices for the next day are not published
+  before ~13:00 (often later), so `dashboard-live` pushes this placeholder for
+  the tomorrow cell rather than skipping the call — otherwise the cell would
+  keep displaying the *previous* day's curve, which looks like current data.
+  `empty_text` / `empty_hint` override the wording.
+
+Optional overrides: `title`, `x`, `y`, `w`, `h`, `y_max`, `y_min_neg`,
+`interval_min`, `highlight_now`, `empty_text`, `empty_hint`.
 
 Drawn on an `lv_canvas` rather than `lv_chart`, because `lv_chart` cannot style
 one individual bar differently — and a single canvas object beats ~96 LVGL

@@ -45,8 +45,14 @@ void chart_spec_defaults(chart_spec_t *spec)
 
 esp_err_t chart_draw(const chart_spec_t *spec)
 {
-    if (!spec || !spec->values || spec->count <= 0 ||
-        spec->count > CHART_MAX_SLOTS || spec->w <= 0 || spec->h <= 0) {
+    /* count == 0 is explicitly allowed and renders a "no data yet" card:
+     * tomorrow's day-ahead prices do not exist before ~13:00, and an empty
+     * framed card communicates that far better than a missing cell. */
+    if (!spec || spec->count < 0 || spec->count > CHART_MAX_SLOTS ||
+        spec->w <= 0 || spec->h <= 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (spec->count > 0 && !spec->values) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -107,6 +113,19 @@ esp_err_t chart_draw(const chart_spec_t *spec)
         snprintf(nowbuf, sizeof(nowbuf), "jetzt %.1f ct", spec->values[now_slot]);
         ui_text_ex(canvas, w / 2, 4, w / 2 - 12, nowbuf, C_WHITE,
                    &lv_font_montserrat_18, LV_TEXT_ALIGN_RIGHT, true);
+    }
+
+    if (spec->count == 0) {
+        const int cy = TITLE_H + (h - TITLE_H) / 2;
+        ui_text_ex(canvas, 0, cy - 26, w, spec->empty_text ? spec->empty_text
+                                                           : "Noch keine Daten",
+                   C_BLACK, &lv_font_montserrat_18, LV_TEXT_ALIGN_CENTER, true);
+        if (spec->empty_hint) {
+            ui_text_ex(canvas, 0, cy + 2, w, spec->empty_hint, C_MID,
+                       &lv_font_montserrat_14, LV_TEXT_ALIGN_CENTER, false);
+        }
+        ESP_LOGI(TAG, "chart '%s': no data", spec->title);
+        return ESP_OK;
     }
 
     /* --- statistics --- */

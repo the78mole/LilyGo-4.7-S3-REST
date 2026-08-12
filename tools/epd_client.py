@@ -72,6 +72,14 @@ class EpdClient:
     def display_weather(self, payload: dict) -> None:
         self._post("/api/display/weather", json=payload)
 
+    def display_chart_empty(self, slot: str = "tomorrow", **overrides) -> None:
+        """Renders the framed 'no data yet' card. Used for tomorrow before the
+        day-ahead prices are published, so the cell states why it is blank
+        instead of silently keeping whatever was on screen before."""
+        payload = {"values": [], "slot": slot}
+        payload.update(overrides)
+        self._post("/api/display/chart", json=payload)
+
     def display_chart(self, values, slot: str = "today", **overrides) -> None:
         """Pushes data points only -- the device supplies the fixed 0..60
         ct/kWh axis, the 15-minute slot width, the cell geometry, and (for
@@ -225,6 +233,14 @@ def cmd_dashboard_live(client: EpdClient, args: argparse.Namespace) -> None:
     if tomorrow:
         client.display_chart(tomorrow, slot="tomorrow")
         print(f"bot-right: {len(tomorrow)} Slots morgen")
+    else:
+        # Day-ahead prices are published around 13:00, often a little later.
+        # Push the placeholder rather than skipping: otherwise the cell keeps
+        # showing yesterday's curve, which looks like current data.
+        client.display_chart_empty(
+            slot="tomorrow",
+            empty_hint="Preise kommen meist ab ca. 13:00")
+        print("bot-right: noch keine Preise fuer morgen -> Platzhalter")
 
     over = [v for v in list(today) + list(tomorrow) if v > args.y_max]
     if over:

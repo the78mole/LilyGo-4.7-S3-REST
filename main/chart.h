@@ -22,6 +22,11 @@ typedef struct {
     float y_min_neg;
     bool highlight_now; /* mark the slot matching the device's local clock */
     const char *unit;
+    /* Shown instead of a plot when count == 0. Tomorrow's day-ahead prices
+     * are not published before ~13:00 (often later), and an empty framed
+     * card says so far more clearly than an absent cell. */
+    const char *empty_text;
+    const char *empty_hint;
 } chart_spec_t;
 
 /*

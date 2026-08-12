@@ -323,14 +323,15 @@ esp_err_t api_display_chart_handler(httpd_req_t *req)
         return send_err(req, HTTPD_400_BAD_REQUEST, "expected \"values\": [ ... ]");
     }
 
+    /* An empty array is legitimate: it renders the "no data yet" card. */
     int count = cJSON_GetArraySize(jvalues);
-    if (count <= 0 || count > CHART_MAX_SLOTS) {
+    if (count < 0 || count > CHART_MAX_SLOTS) {
         cJSON_Delete(root);
-        return send_err(req, HTTPD_400_BAD_REQUEST, "values must hold 1..96 numbers");
+        return send_err(req, HTTPD_400_BAD_REQUEST, "values must hold 0..96 numbers");
     }
 
-    float *values = malloc((size_t)count * sizeof(float));
-    if (!values) {
+    float *values = count > 0 ? malloc((size_t)count * sizeof(float)) : NULL;
+    if (count > 0 && !values) {
         cJSON_Delete(root);
         return send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "out of memory");
     }
@@ -367,6 +368,19 @@ esp_err_t api_display_chart_handler(httpd_req_t *req)
         strlcpy(title, jtitle->valuestring, sizeof(title));
     }
     spec.title = title;
+
+    char empty_text[48] = "Noch keine Daten";
+    char empty_hint[64] = "";
+    cJSON *jet = cJSON_GetObjectItemCaseSensitive(root, "empty_text");
+    if (cJSON_IsString(jet)) {
+        strlcpy(empty_text, jet->valuestring, sizeof(empty_text));
+    }
+    cJSON *jeh = cJSON_GetObjectItemCaseSensitive(root, "empty_hint");
+    if (cJSON_IsString(jeh)) {
+        strlcpy(empty_hint, jeh->valuestring, sizeof(empty_hint));
+    }
+    spec.empty_text = empty_text;
+    spec.empty_hint = empty_hint[0] ? empty_hint : NULL;
 
     /* Optional overrides. */
     cJSON *j;
@@ -450,6 +464,7 @@ esp_err_t api_display_list_handler(httpd_req_t *req)
         strlcpy(title, jtitle->valuestring, sizeof(title));
     }
     spec.title = title;
+
     cJSON_Delete(root);
 
     if (!lvgl_port_lock(LVGL_LOCK_TIMEOUT_MS)) {
