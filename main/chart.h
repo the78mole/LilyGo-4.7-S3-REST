@@ -15,7 +15,11 @@ typedef struct {
     const float *values;
     int count;
     int interval_min;   /* minutes per slot; 15 -> 96 slots/day */
-    float y_min, y_max; /* fixed axis range -- see chart_spec_defaults() */
+    float y_max;        /* fixed ceiling -- see chart_spec_defaults() */
+    /* Floor used only when the data actually contains negative values;
+     * otherwise the axis stays at 0 so the full height serves the normal
+     * range. Capped rather than adaptive, for the same reason as y_max. */
+    float y_min_neg;
     bool highlight_now; /* mark the slot matching the device's local clock */
     const char *unit;
 } chart_spec_t;
@@ -37,8 +41,10 @@ void chart_spec_defaults(chart_spec_t *spec);
  * LVGL object instead of ~96, which matters on a panel this size.
  *
  * The y axis is fixed (not auto-scaled) so charts stay comparable between
- * days; values above y_max are clamped and flagged with a marker rather than
- * silently drawn as if they were exactly y_max.
+ * days; values outside [y_min_neg, y_max] are clamped and flagged with a
+ * marker rather than silently drawn as if they sat exactly on the bound.
+ * The lower bound opens up only when the data contains negative prices --
+ * bars then grow from a labelled zero line, upward or downward.
  *
  * The caller must hold the LVGL lock.
  */

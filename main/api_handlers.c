@@ -375,6 +375,7 @@ esp_err_t api_display_chart_handler(httpd_req_t *req)
     if (cJSON_IsNumber(j = cJSON_GetObjectItemCaseSensitive(root, "w"))) spec.w = j->valueint;
     if (cJSON_IsNumber(j = cJSON_GetObjectItemCaseSensitive(root, "h"))) spec.h = j->valueint;
     if (cJSON_IsNumber(j = cJSON_GetObjectItemCaseSensitive(root, "y_max"))) spec.y_max = (float)j->valuedouble;
+    if (cJSON_IsNumber(j = cJSON_GetObjectItemCaseSensitive(root, "y_min_neg"))) spec.y_min_neg = (float)j->valuedouble;
     if (cJSON_IsNumber(j = cJSON_GetObjectItemCaseSensitive(root, "interval_min"))) spec.interval_min = j->valueint;
     if (cJSON_IsBool(j = cJSON_GetObjectItemCaseSensitive(root, "highlight_now"))) spec.highlight_now = cJSON_IsTrue(j);
 

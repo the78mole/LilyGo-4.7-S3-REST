@@ -101,6 +101,21 @@ menu "LilyGo T5-4.7 S3 Application"
                 intended behaviour. Raise it only if the threshold at which
                 you change your own behaviour actually changes.
 
+        config APP_CHART_Y_MIN_NEG
+            int "Chart y-axis floor when prices go negative (ct/kWh)"
+            default -10
+            range -100 0
+            help
+                Only used when the plotted data actually contains negative
+                values; otherwise the axis stays at 0 so the full plot height
+                serves the range that normally matters.
+
+                Capped for the same reason as the ceiling: negative prices
+                have been as low as -49 ct/kWh, but once they are negative at
+                all the answer is "switch everything on", and how far below
+                zero they go changes nothing. Bars beyond this floor are
+                clamped and flagged with a marker.
+
         config APP_CHART_INTERVAL_MIN
             int "Minutes per chart slot"
             default 15

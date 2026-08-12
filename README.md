@@ -149,6 +149,16 @@ case. Everything else has a firmware-side default (`Kconfig` → *Time / Chart*)
   expensive one. Values above the maximum are clamped *and* flagged with a
   marker, so an outlier can never masquerade as exactly `y_max`.
 
+- **Lower bound opens up only when needed.** On an ordinary day the axis
+  starts at 0, so the full plot height serves the range that matters. When the
+  data actually contains negative prices, the axis drops to
+  `CONFIG_APP_CHART_Y_MIN_NEG` (default −10 ct/kWh) and bars grow from a
+  labelled zero line — upward when the price costs money, downward when it
+  pays. Negative bars are drawn white-with-outline so they stand out from
+  merely cheap ones. The floor is capped for the same reason as the ceiling:
+  prices have hit −49 ct/kWh, but once they are negative at all the answer is
+  "switch everything on", and how far below zero they go changes nothing.
+
   The ceiling is deliberately a **decision threshold, not a display range**:
   above ~60 ct/kWh you should not be starting a dishwasher or planning to bake
   bread anyway, so how far an outlier overshoots carries no information worth

@@ -1,5 +1,6 @@
 #include "chart.h"
 
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -32,8 +33,8 @@ void chart_spec_defaults(chart_spec_t *spec)
     spec->title = "Strompreis";
     spec->unit = "ct/kWh";
     spec->interval_min = CONFIG_APP_CHART_INTERVAL_MIN;
-    spec->y_min = 0.0f;
     spec->y_max = (float)CONFIG_APP_CHART_Y_MAX;
+    spec->y_min_neg = (float)CONFIG_APP_CHART_Y_MIN_NEG;
     spec->highlight_now = true;
     /* Bottom-left cell of the 2x2 dashboard grid. */
     spec->x = CONFIG_APP_CHART_MARGIN;
@@ -124,8 +125,17 @@ esp_err_t chart_draw(const chart_spec_t *spec)
      * price, so clipping loses no actionable information. The title bar still
      * shows the true current value. Guard against a degenerate range coming
      * in over REST. */
-    float lo = spec->y_min;
+    /* Lower bound is data-dependent: stay at 0 on an ordinary day so the full
+     * plot height is spent on the range that matters, and only open up the
+     * negative band when prices actually go negative. The floor is capped
+     * (y_min_neg, default -10) for the same reason the ceiling is capped --
+     * once it is deeply negative the answer is "switch everything on", and
+     * how far below it goes changes nothing. */
     float hi = spec->y_max;
+    float lo = (mn < 0.0f) ? spec->y_min_neg : 0.0f;
+    if (lo > 0.0f) {
+        lo = 0.0f;
+    }
     if (!(hi > lo)) {
         lo = 0.0f;
         hi = (float)CONFIG_APP_CHART_Y_MAX;
@@ -149,16 +159,32 @@ esp_err_t chart_draw(const chart_spec_t *spec)
              avg, mn, mx, spec->unit ? spec->unit : "");
     lv_canvas_draw_text(canvas, plot_x0, TITLE_H + 4, plot_w, &label, caption);
 
+    /* Pixel row of the zero line -- the baseline every bar grows from. With
+     * lo == 0 this is the bottom of the plot, i.e. identical to the previous
+     * behaviour. */
+    const int zero_y = plot_y1 - (int)((0.0f - lo) / (hi - lo) * plot_h);
+
     /* --- horizontal grid + y labels --- */
     rect.bg_color = C_LIGHT;
     for (int k = 0; k <= 3; k++) {
         float frac = k / 3.0f;
         int gy = plot_y1 - (int)(frac * plot_h);
+        if (lo < 0.0f && abs(gy - zero_y) < 10) {
+            continue; /* would collide with the zero line drawn below */
+        }
         lv_canvas_draw_rect(canvas, plot_x0, gy, plot_w, 1, &rect);
 
         char lbl[16];
         snprintf(lbl, sizeof(lbl), "%d", (int)(lo + frac * (hi - lo) + 0.5f));
         lv_canvas_draw_text(canvas, 2, gy - 8, AXIS_LEFT - 4, &label, lbl);
+    }
+
+    if (lo < 0.0f) {
+        /* Zero gets its own labelled line: with a negative band present it is
+         * the reference that decides "costs money" vs "pays you". */
+        rect.bg_color = C_MID;
+        lv_canvas_draw_rect(canvas, plot_x0, zero_y, plot_w, 1, &rect);
+        lv_canvas_draw_text(canvas, 2, zero_y - 8, AXIS_LEFT - 4, &label, "0");
     }
 
     /* --- bars --- */
@@ -169,29 +195,64 @@ esp_err_t chart_draw(const chart_spec_t *spec)
 
     for (int i = 0; i < spec->count; i++) {
         float v = spec->values[i];
-        bool clipped = v > hi;
+        bool over = v > hi;
+        bool under = v < lo;
         float vc = v;
         if (vc > hi) vc = hi;
         if (vc < lo) vc = lo;
-        int bh = (int)((vc - lo) / (hi - lo) * plot_h);
-        if (bh < 1) bh = 1;
-        int bx = plot_x0 + (int)(i * slot_w);
-        int by = plot_y1 - bh;
 
-        /* Cheap slots light, expensive slots dark -- legible without colour. */
-        rect.bg_color = (v < avg * 0.85f) ? C_LIGHT : (v < avg * 1.15f ? C_MID : C_DARK);
+        int vy = plot_y1 - (int)((vc - lo) / (hi - lo) * plot_h);
+        int bx = plot_x0 + (int)(i * slot_w);
+
+        /* Grow from the zero line: upward when the price is positive,
+         * downward when it is negative. */
+        int by, bh;
+        if (vy <= zero_y) {
+            by = vy;
+            bh = zero_y - vy;
+        } else {
+            by = zero_y;
+            bh = vy - zero_y;
+        }
+        if (bh < 1) bh = 1;
+
+        /* Cheap slots light, expensive slots dark -- legible without colour.
+         * Negative prices get the lightest fill plus an outline: they are the
+         * "switch everything on" case and should stand out from merely cheap.
+         * The avg-relative thresholds are only meaningful for a positive
+         * average, so fall back to absolute ones otherwise. */
         rect.border_width = 0;
+        if (v < 0.0f) {
+            rect.bg_color = C_WHITE;
+        } else if (avg > 0.0f) {
+            rect.bg_color = (v < avg * 0.85f) ? C_LIGHT : (v < avg * 1.15f ? C_MID : C_DARK);
+        } else {
+            rect.bg_color = (v < hi * 0.33f) ? C_LIGHT : (v < hi * 0.66f ? C_MID : C_DARK);
+        }
         lv_canvas_draw_rect(canvas, bx, by, bar_w, bh, &rect);
 
-        if (clipped) {
+        if (v < 0.0f) {
+            /* Outline, otherwise a white bar on white background is invisible. */
+            rect.bg_color = C_BLACK;
+            lv_canvas_draw_rect(canvas, bx, by + bh - 1, bar_w, 1, &rect);
+            lv_canvas_draw_rect(canvas, bx, by, 1, bh, &rect);
+            lv_canvas_draw_rect(canvas, bx + bar_w - 1, by, 1, bh, &rect);
+        }
+
+        if (over) {
             /* Do not let an out-of-range value masquerade as exactly y_max. */
             rect.bg_color = C_BLACK;
             lv_canvas_draw_rect(canvas, bx, plot_y0 - 3, bar_w, 2, &rect);
         }
+        if (under) {
+            /* Same, at the other end of the scale. */
+            rect.bg_color = C_BLACK;
+            lv_canvas_draw_rect(canvas, bx, plot_y1 + 1, bar_w, 2, &rect);
+        }
 
         if (i == now_slot) {
-            /* Outline the current slot and run a marker up the full height so
-             * it stays findable even when the bar itself is short. */
+            /* Outline the current slot and run a marker along it so it stays
+             * findable even when the bar itself is short. */
             rect.bg_color = C_BLACK;
             lv_canvas_draw_rect(canvas, bx - 1, by - 3, bar_w + 2, 3, &rect);
             lv_canvas_draw_rect(canvas, bx - 1, by - 3, 1, bh + 3, &rect);
@@ -207,7 +268,7 @@ esp_err_t chart_draw(const chart_spec_t *spec)
     }
 
     /* --- baseline + hour ticks --- */
-    lv_canvas_draw_rect(canvas, plot_x0, plot_y1, plot_w, 2, &rect);
+    lv_canvas_draw_rect(canvas, plot_x0, zero_y, plot_w, 2, &rect);
 
     int slots_per_hour = (spec->interval_min > 0) ? 60 / spec->interval_min : 1;
     if (slots_per_hour < 1) slots_per_hour = 1;
